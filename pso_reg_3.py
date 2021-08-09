@@ -62,7 +62,7 @@ def objective_fcn(y_true, y_pred, **kwargs):
         alpha: The balancing value
     
     """
-    p = r2(y_true,y_pred) #objective 1
+    p = kwargs['P'](y_true,y_pred) #objective 1
     #kwargs['ratio_selected_features'] is objective 2
     
     j = obj_function_equation(p, kwargs['ratio_selected_features'], kwargs['alpha'])
@@ -73,7 +73,7 @@ def obj_function_equation(obj_1, obj_2, alpha):
     j = (alpha * (1-obj_1) + (1.0 - alpha) * (obj_2))
     return j
 
-def f_per_particle(m, alpha, X, y):
+def f_per_particle(m, alpha, X, y, P, ML_Algo):
     """Computes for the objective function per particle
 
     Inputs
@@ -102,12 +102,12 @@ def f_per_particle(m, alpha, X, y):
     ratio_selected_features = X_subset.shape[1]/total_features
     
     #Particle fittness error/loss computed using cross validation
-    fitness_error = make_scorer(objective_fcn,  ratio_selected_features=ratio_selected_features, alpha=alpha)
-    scores = cross_val_score(regressor, X_subset, y, cv=10, scoring=fitness_error)
+    fitness_error = make_scorer(objective_fcn,  ratio_selected_features=ratio_selected_features, P=P, alpha=alpha)
+    scores = cross_val_score(ML_Algo, X_subset, y, cv=10, scoring=fitness_error)
   
     j = scores.mean()
     return j
-def f(swarm, X,y, alpha=0.5):
+def f(swarm, X,y, performance_metric,alpha, ML_Algo):
     """Higher-level method to do classification/regression in the
     whole swarm.
 
@@ -130,7 +130,7 @@ def f(swarm, X,y, alpha=0.5):
     
     n_particles = swarm.shape[0]
 
-    j = [f_per_particle(swarm[particle], alpha, X, y) for particle in range(n_particles)]
+    j = [f_per_particle(swarm[particle], alpha, X, y, performance_metric, ML_Algo) for particle in range(n_particles)]
     return np.array(j)
 
                                         ###############
@@ -142,12 +142,12 @@ options = {'c1': 0.5, 'c2': 0.5, 'w':0.3, 'k': 30, 'p':2}
 
 # Call instance of PSO
 dimensions = X.shape[1] # dimensions should be the number of features
-#optimizer.reset()
+
 optimizer = ps.discrete.BinaryPSO(n_particles=30, dimensions=dimensions, options=options)
 
 # Perform optimization
 #pass eval metrics in here? See codebase
-cost, pos = optimizer.optimize(f,  iters=100, verbose=True, X=X, y=y)
+cost, pos = optimizer.optimize(f,  iters=100, verbose=True, X=X, y=y, performance_metric = r2, ML_Algo = regressor,alpha=0.5)
 
 # Create two instances of LinearRegression
 r1 = linear_model.LinearRegression()
