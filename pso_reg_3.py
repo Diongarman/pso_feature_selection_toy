@@ -1,6 +1,4 @@
 import glob
-
-
 # Import modules
 import numpy as np
 import seaborn as sns
@@ -13,12 +11,14 @@ from sklearn.metrics import roc_auc_score, make_scorer
 from sklearn.metrics import mean_squared_error as mse
 from sklearn.metrics import r2_score as r2
 from sklearn.model_selection import cross_val_score, cross_validate
+from sklearn.ensemble import GradientBoostingRegressor
 
 for file_name in glob.glob('*.xlsx'):
 
     print('Processing ' + file_name + '...')
     try:
         data = pd.read_excel(file_name)
+        print(data.columns)
         y = (data.iloc[:, -1]).to_numpy()
         index = len(data.columns)
         X = (data.iloc[:, 0:index-1]).to_numpy()
@@ -38,6 +38,7 @@ df['labels'] = y
 
 regressor = linear_model.LinearRegression()
 #regressor = RandomForestRegressor(max_depth=2)
+#regressor = GradientBoostingRegressor(n_estimators=100, learning_rate=0.1, max_depth=1, random_state=0, loss='ls')
 
 #measure fitness error - optimiser aims to find minima solution
 def objective_fcn(y_true, y_pred, **kwargs):
@@ -60,13 +61,15 @@ def objective_fcn(y_true, y_pred, **kwargs):
         alpha: The balancing value
     
     """
-    P = r2(y_true,y_pred)
-    j = obj_function_equation(P, kwargs['total_feats'],kwargs['num_selected_features'], kwargs['alpha'])
+    err = r2(y_true,y_pred) #objective 1
+    ratio_selected_features = kwargs['num_selected_features']/kwargs['total_feats'] #objective 2
+    
+    j = obj_function_equation(err, ratio_selected_features, kwargs['alpha'])
     
     return j
 
-def obj_function_equation(P, tot_features, num_selected_features,alpha):
-    j = (alpha * (1-P) + (1.0 - alpha) * ((num_selected_features/tot_features)))
+def obj_function_equation(obj_1, obj_2, alpha):
+    j = (alpha * (1-obj_1) + (1.0 - alpha) * (obj_2))
     return j
 
 def f_per_particle(m, alpha, X, y):
@@ -159,6 +162,8 @@ scores2 = cross_validate(r2, X, y, cv=10, scoring='r2')
 subset_performance = scores['test_score'].mean()
 wholeset_performance = scores2['test_score'].mean()
 
+
+print('Subset fitness cost/loss: %.3f' % (cost))
 print('Subset performance: %.3f' % (subset_performance))
 print('Full set performance: %.3f' % (wholeset_performance))
 
@@ -169,6 +174,29 @@ print('Full set performance: %.3f' % (wholeset_performance))
 #print('Subset performance: %.3f' % (subset_performance))
 
 df1 = pd.DataFrame(X_selected_features)
+
+#get feature-column names
+def get_feature_col_names(data, bit_list):
+
+    """ 
+    
+    inputs
+    -------
+
+    outputs
+    -------
+    
+    """
+    cols = list(data.columns)
+    indices = [i for i, x in enumerate(bit_list) if x == 1]
+    cols = [cols[i] for i in indices]
+
+    return cols
+
+cols = get_feature_col_names(data, pos)
+print('best columns', cols)
+
+
 #df1['labels'] = pd.Series(y)
 
 sns.pairplot(df1,height=5, aspect=.8, kind="reg")
