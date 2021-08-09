@@ -6,6 +6,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 # Import PySwarms
 import pyswarms as ps
+from pyswarms.utils.plotters import plot_cost_history
 from sklearn import linear_model
 from sklearn.metrics import roc_auc_score, make_scorer
 from sklearn.metrics import mean_squared_error as mse
@@ -61,10 +62,10 @@ def objective_fcn(y_true, y_pred, **kwargs):
         alpha: The balancing value
     
     """
-    err = r2(y_true,y_pred) #objective 1
-    ratio_selected_features = kwargs['num_selected_features']/kwargs['total_feats'] #objective 2
+    p = r2(y_true,y_pred) #objective 1
+    #kwargs['ratio_selected_features'] is objective 2
     
-    j = obj_function_equation(err, ratio_selected_features, kwargs['alpha'])
+    j = obj_function_equation(p, kwargs['ratio_selected_features'], kwargs['alpha'])
     
     return j
 
@@ -98,9 +99,10 @@ def f_per_particle(m, alpha, X, y):
     else:
         X_subset = X[:,m==1]
 
+    ratio_selected_features = X_subset.shape[1]/total_features
+    
     #Particle fittness error/loss computed using cross validation
-        #greater_is_better=False, -> argument is removed from make_scorer
-    fitness_error = make_scorer(objective_fcn,  num_selected_features=X_subset.shape[1], total_feats=total_features, alpha=alpha)
+    fitness_error = make_scorer(objective_fcn,  ratio_selected_features=ratio_selected_features, alpha=alpha)
     scores = cross_val_score(regressor, X_subset, y, cv=10, scoring=fitness_error)
   
     j = scores.mean()
@@ -144,9 +146,8 @@ dimensions = X.shape[1] # dimensions should be the number of features
 optimizer = ps.discrete.BinaryPSO(n_particles=30, dimensions=dimensions, options=options)
 
 # Perform optimization
+#pass eval metrics in here? See codebase
 cost, pos = optimizer.optimize(f,  iters=100, verbose=True, X=X, y=y)
-optimizer.reset()
-
 
 # Create two instances of LinearRegression
 r1 = linear_model.LinearRegression()
@@ -200,19 +201,9 @@ print('best columns', cols)
 #df1['labels'] = pd.Series(y)
 
 sns.pairplot(df1,height=5, aspect=.8, kind="reg")
-
 plt.show()
 
-#Objective function
-#negative error
-#check score function mechanics
+plot_cost_history(cost_history=optimizer.mean_neighbor_history)
+plt.show()
 
-#compare performances with FSS and none
-
-# r2 training subset
-# X_r2_train_selected_features = X_train[:, pos_r2_train == 1]
-# r2 testing subset
-# X_r2_test_selected_features = X_test[:, pos_r2_train == 1]
-# regression_model.fit(X_r2_train_selected_features, y_train)
-# predicted_values_r2_train = regression_model.predict(X_r2_train_selected_features)
-# predicted_values_r2_test = regression_model.predict(X_r2_test_selected_features)
+optimizer.reset()
