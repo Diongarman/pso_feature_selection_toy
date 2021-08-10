@@ -137,16 +137,39 @@ def f(swarm, X,y, performance_metric,alpha, ML_Algo):
                                         ###############
                                         # Driver Code #
                                         ###############
+#get feature-column names
+def get_feature_col_names(data, bit_list):
 
+    """ 
+    
+    inputs
+    -------
 
-def run_feature_selection(options, X, y, n_particles,it, performance_metric, ML_Algo):
+    outputs
+    -------
+    
+    """
+    cols = list(data.columns)
+    indices = [i for i, x in enumerate(bit_list) if x == 1]
+    cols = [cols[i] for i in indices]
 
-    ########################################
+    return cols
+
+def instantiate_and_perform_pso(options, X, y, n_particles,it, performance_metric, ML_Algo):
+        ########################################
     # Instantiate and perform optimisation #
     ########################################
     dimensions = X.shape[1]# dimensions should be the number of features
     optimizer = ps.discrete.BinaryPSO(n_particles=n_particles, dimensions=dimensions, options=options)# Call instance of PSO
     cost, pos = optimizer.optimize(f,  iters=it, verbose=True, X=X, y=y, performance_metric = performance_metric, ML_Algo = ML_Algo(), alpha=0.5)# Perform optimization
+
+    return cost, pos, optimizer
+
+
+
+def get_metrics( X, y, pos, cost,ML_Algo):
+
+
 
     
     ########################################
@@ -169,13 +192,20 @@ def run_feature_selection(options, X, y, n_particles,it, performance_metric, ML_
     subset_performance = scores['test_score'].mean()
     wholeset_performance = scores2['test_score'].mean()
 
-    return cost, subset_performance, wholeset_performance
+    #get ratio of selected features
+    num_selected = np.count_nonzero(pos)
+    total_feats = len(pos)
+    selected_features_ratio = "{selected}/{total}".format(selected = str(num_selected), total = str(total_feats))
+
+    return cost, selected_features_ratio, subset_performance, wholeset_performance
 
 
-def create_results(d,cost, subset_performance, wholeset_performance):
-    d[' best cost'].append(cost)
+def create_results(d, cost, selected_features_ratio,subset_performance, wholeset_performance):
+    d['best cost'].append(cost)
     d['subset performance'].append(subset_performance)
     d['full dataset performance'].append(wholeset_performance)
+    d['ratio selected'].append(selected_features_ratio)
+    d['selected features'].append(get_feature_col_names(data, pos))#data is global - consider changing this
 
     return pd.DataFrame(data=d)
 
@@ -184,46 +214,29 @@ def create_results(d,cost, subset_performance, wholeset_performance):
 # Initialize swarm, arbitrary: See academic papers on initialisations -> want a function that automatically creates this
 options = {'c1': 0.5, 'c2': 0.5, 'w':0.3, 'k': 30, 'p':2} #arbitary
 
-d = {' best cost': [], 'subset performance': [], 'full dataset performance': []}
-results = create_results(d, *run_feature_selection(options, X,y, 30,100, r2, linear_model.LinearRegression))
+#stantiate and perform PSO
+cost, pos, opt = instantiate_and_perform_pso(options, X,y, 30,100, r2, linear_model.LinearRegression)
+
+#get results
+d = {'best cost': [], 'subset performance': [], 'full dataset performance': [], 'ratio selected':[],'selected features': []}
+results = create_results(d, *get_metrics(X,y,  pos,cost,linear_model.LinearRegression))
+with pd.option_context('display.max_rows', None, 'display.max_columns', None):  # more options can be specified also
+    print(results)
 
 
-print(results)
+
+def viz():
 
 
-#need pos for X_selected_features and best columns function
-#need optimizer instance for cost_history
+    X_selected_features = X[:,pos==1]
+    df1 = pd.DataFrame(X_selected_features)
 
-df1 = pd.DataFrame(X_selected_features)
+    #df1['labels'] = pd.Series(y)
 
-#get feature-column names
-def get_feature_col_names(data, bit_list):
+    sns.pairplot(df1,height=5, aspect=.8, kind="reg")
+    plt.show()
 
-    """ 
-    
-    inputs
-    -------
+    plot_cost_history(cost_history=opt.mean_neighbor_history)
+    plt.show()
 
-    outputs
-    -------
-    
-    """
-    cols = list(data.columns)
-    indices = [i for i, x in enumerate(bit_list) if x == 1]
-    cols = [cols[i] for i in indices]
-
-    return cols
-
-cols = get_feature_col_names(data, pos)
-print('best columns', cols)
-
-
-#df1['labels'] = pd.Series(y)
-
-sns.pairplot(df1,height=5, aspect=.8, kind="reg")
-plt.show()
-
-plot_cost_history(cost_history=optimizer.mean_neighbor_history)
-plt.show()
-
-optimizer.reset()
+opt.reset()
