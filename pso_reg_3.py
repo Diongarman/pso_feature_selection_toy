@@ -200,7 +200,7 @@ def get_metrics( X, y, pos, cost,ML_Algo):
     return cost, selected_features_ratio, subset_performance, wholeset_performance
 
 
-def create_results(d, cost, selected_features_ratio,subset_performance, wholeset_performance,pos):
+def create_results(d, cost, selected_features_ratio,subset_performance, wholeset_performance, pos):
     d['best cost'].append(cost)
     d['subset performance'].append(subset_performance)
     d['full dataset performance'].append(wholeset_performance)
@@ -213,9 +213,10 @@ def create_results(d, cost, selected_features_ratio,subset_performance, wholeset
 
 
 
+def flatten(t):
+    return [item for sublist in t for item in sublist]
 
-
-def viz():
+def viz(pos, opt):
 
 
     X_selected_features = X[:,pos==1]
@@ -246,11 +247,18 @@ def main(a):
         cost, pos, opt = instantiate_and_perform_pso(options, X,y, 30,100, r2, linear_model.LinearRegression)
 
         results = create_results(d, *get_metrics(X,y,  pos,cost,linear_model.LinearRegression), pos)
+
+        #viz(pos, opt)
         
 
 
         opt.reset()
-main(3)
+main(10)
 with pd.option_context('display.max_rows', None, 'display.max_columns', None):  # more options can be specified also
     print(results)
+    collection = flatten(results['selected features'].tolist())
+    feat_freq_dict = dict((x,collection.count(x)) for x in set(collection))
+
+    plt.bar(feat_freq_dict.keys(), feat_freq_dict.values())
+    plt.show()
 
