@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 # Import PySwarms
 import pyswarms as ps
 from pyswarms.utils.plotters import plot_cost_history
+# sklearn imports
 from sklearn import linear_model
 from sklearn.metrics import roc_auc_score, make_scorer
 from sklearn.metrics import mean_squared_error as mse
@@ -37,7 +38,7 @@ df['labels'] = y
 
 #plt.show()
 
-regressor = linear_model.LinearRegression()
+#regressor = linear_model.LinearRegression()
 #regressor = RandomForestRegressor(max_depth=2)
 #regressor = GradientBoostingRegressor(n_estimators=100, learning_rate=0.1, max_depth=1, random_state=0, loss='ls')
 
@@ -137,42 +138,61 @@ def f(swarm, X,y, performance_metric,alpha, ML_Algo):
                                         # Driver Code #
                                         ###############
 
-# Initialize swarm, arbitrary: See academic papers on initialisations
-options = {'c1': 0.5, 'c2': 0.5, 'w':0.3, 'k': 30, 'p':2}
 
-# Call instance of PSO
-dimensions = X.shape[1] # dimensions should be the number of features
+def run_feature_selection(options, X, y, n_particles,it, performance_metric, ML_Algo):
 
-optimizer = ps.discrete.BinaryPSO(n_particles=30, dimensions=dimensions, options=options)
+    ########################################
+    # Instantiate and perform optimisation #
+    ########################################
+    dimensions = X.shape[1]# dimensions should be the number of features
+    optimizer = ps.discrete.BinaryPSO(n_particles=n_particles, dimensions=dimensions, options=options)# Call instance of PSO
+    cost, pos = optimizer.optimize(f,  iters=it, verbose=True, X=X, y=y, performance_metric = performance_metric, ML_Algo = ML_Algo(), alpha=0.5)# Perform optimization
 
-# Perform optimization
-#pass eval metrics in here? See codebase
-cost, pos = optimizer.optimize(f,  iters=100, verbose=True, X=X, y=y, performance_metric = r2, ML_Algo = regressor,alpha=0.5)
+    
+    ########################################
+    # Get optimisation performance metrics # 
+    ########################################
+     
+      
+    # Create two instances of whatever ML Algorithm is selected - for comparing performances with an without
+    m1 = ML_Algo()
+    m2 = ML_Algo()
 
-# Create two instances of LinearRegression
-r1 = linear_model.LinearRegression()
-r2 = linear_model.LinearRegression()
+    # Get the selected features from the final positions
+    X_selected_features = X[:,pos==1]# subset
 
-# Get the selected features from the final positions
-X_selected_features = X[:,pos==1]  # subset
+    # Compute performance using CV
+    scores = cross_validate(m1, X_selected_features, y, cv=10, scoring='r2')
+    scores2 = cross_validate(m2, X, y, cv=10, scoring='r2')
 
-# Compute performance using CV
-scores = cross_validate(r1, X_selected_features, y, cv=10, scoring='r2')
-scores2 = cross_validate(r2, X, y, cv=10, scoring='r2')
+    #Get mean performance obtained from CV
+    subset_performance = scores['test_score'].mean()
+    wholeset_performance = scores2['test_score'].mean()
 
-subset_performance = scores['test_score'].mean()
-wholeset_performance = scores2['test_score'].mean()
-
-
-print('Subset fitness cost/loss: %.3f' % (cost))
-print('Subset performance: %.3f' % (subset_performance))
-print('Full set performance: %.3f' % (wholeset_performance))
+    return cost, subset_performance, wholeset_performance
 
 
-# Compute performance
-#subset_performance = c1.score(X_selected_features, y)
+def create_results(d,cost, subset_performance, wholeset_performance):
+    d[' best cost'].append(cost)
+    d['subset performance'].append(subset_performance)
+    d['full dataset performance'].append(wholeset_performance)
 
-#print('Subset performance: %.3f' % (subset_performance))
+    return pd.DataFrame(data=d)
+
+
+
+# Initialize swarm, arbitrary: See academic papers on initialisations -> want a function that automatically creates this
+options = {'c1': 0.5, 'c2': 0.5, 'w':0.3, 'k': 30, 'p':2} #arbitary
+
+d = {' best cost': [], 'subset performance': [], 'full dataset performance': []}
+results = create_results(d, *run_feature_selection(options, X,y, 30,100, r2, linear_model.LinearRegression))
+
+
+print(results)
+
+
+#need pos for X_selected_features and best columns function
+#need optimizer instance for cost_history
 
 df1 = pd.DataFrame(X_selected_features)
 
