@@ -200,7 +200,7 @@ def get_metrics( X, y, pos, cost,ML_Algo):
     return cost, selected_features_ratio, subset_performance, wholeset_performance
 
 
-def create_results(d, cost, selected_features_ratio,subset_performance, wholeset_performance):
+def create_results(d, cost, selected_features_ratio,subset_performance, wholeset_performance,pos):
     d['best cost'].append(cost)
     d['subset performance'].append(subset_performance)
     d['full dataset performance'].append(wholeset_performance)
@@ -211,17 +211,7 @@ def create_results(d, cost, selected_features_ratio,subset_performance, wholeset
 
 
 
-# Initialize swarm, arbitrary: See academic papers on initialisations -> want a function that automatically creates this
-options = {'c1': 0.5, 'c2': 0.5, 'w':0.3, 'k': 30, 'p':2} #arbitary
 
-#stantiate and perform PSO
-cost, pos, opt = instantiate_and_perform_pso(options, X,y, 30,100, r2, linear_model.LinearRegression)
-
-#get results
-d = {'best cost': [], 'subset performance': [], 'full dataset performance': [], 'ratio selected':[],'selected features': []}
-results = create_results(d, *get_metrics(X,y,  pos,cost,linear_model.LinearRegression))
-with pd.option_context('display.max_rows', None, 'display.max_columns', None):  # more options can be specified also
-    print(results)
 
 
 
@@ -239,4 +229,28 @@ def viz():
     plot_cost_history(cost_history=opt.mean_neighbor_history)
     plt.show()
 
-opt.reset()
+# Initialize swarm, arbitrary: See academic papers on initialisations -> want a function that automatically creates this
+options = {'c1': 0.5, 'c2': 0.5, 'w':0.3, 'k': 30, 'p':2} #arbitary
+
+
+
+#get results
+d = {'best cost': [], 'subset performance': [], 'full dataset performance': [], 'ratio selected':[],'selected features': []}
+
+
+def main(a):
+    global results
+    for x in range(a):
+        
+        #stantiate and perform PSO
+        cost, pos, opt = instantiate_and_perform_pso(options, X,y, 30,100, r2, linear_model.LinearRegression)
+
+        results = create_results(d, *get_metrics(X,y,  pos,cost,linear_model.LinearRegression), pos)
+        
+
+
+        opt.reset()
+main(3)
+with pd.option_context('display.max_rows', None, 'display.max_columns', None):  # more options can be specified also
+    print(results)
+
