@@ -18,7 +18,7 @@ from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
 class FSS_PSO_Builder:
 
 
-    d = {'best cost': [], 'subset performance': [],'full dataset performance': [], 'ratio selected':[],'selected features': []}
+    d = {'best cost': [], 'msle (subset)': [],'msle (all)':[], 'r2 (subset)':[], 'r2 (all)':[], 'mae (subset)':[], 'mae (all)':[],'ratio selected':[],'selected features': []}
     #data = pd.read_excel(file_name)
     # performance_metric -> pass in list of sklearn metrics later
     def __init__(self, options, data, n_particles,it, regressor ,performance_metric,alpha, obj_function_equation, final_eval_ML_model_1, final_eval_ML_model_2):
@@ -57,7 +57,13 @@ class FSS_PSO_Builder:
         
         n_particles = swarm.shape[0]
 
-        j = [self.f_per_particle(swarm[particle], alpha, X, y, performance_metric) for particle in range(n_particles)]
+        j = [
+            self.f_per_particle(swarm[particle], alpha, X, y, performance_metric) 
+            for particle in range(n_particles)
+            ]
+        
+        print(min(j))
+        print(j.index(min(j)))
         return np.array(j)
     def f_per_particle(self,m, alpha, X, y, P):
         """Computes for the objective function per particle
@@ -127,18 +133,39 @@ class FSS_PSO_Builder:
         # Get the selected features from the final positions
         X_selected_features = self.X[:,self.pos==1]# subset
 
-        # Compute performance using CV
-        scores = cross_validate(self.m1, X_selected_features, self.y, cv=10, scoring='r2')
-        scores2 = cross_validate(self.m2, self.X, self.y, cv=10, scoring='r2')
 
-        #Get mean performance obtained from CV
-        self.subset_performance = scores['test_score'].mean()
-        self.wholeset_performance = scores2['test_score'].mean()
+        # Compute R2 estimate using CV
+        r2_subset = cross_validate(self.m1, X_selected_features, self.y, cv=10, scoring='r2')
+        r2_all = cross_validate(self.m2, self.X, self.y, cv=10, scoring='r2')
+
+        # Get mean R2 estimate obtained from CV
+        self.r2_subset = r2_subset['test_score'].mean()
+        self.r2_all = r2_all['test_score'].mean()
+        
+        # Compute msle estimate using CV
+        msle_subset = cross_validate(self.m1, X_selected_features, self.y, cv=10, scoring='neg_mean_squared_log_error')
+        msle_all = cross_validate(self.m2, self.X, self.y, cv=10, scoring='neg_mean_squared_log_error')
+
+        # Get mean msle estimate obtained from CV
+        self.msle_subset = msle_subset['test_score'].mean()
+        self.msle_all = msle_all['test_score'].mean()
+
+        # Compute mae estimate using CV
+        mae_subset = cross_validate(self.m1, X_selected_features, self.y, cv=10, scoring='neg_mean_absolute_error')
+        mae_all = cross_validate(self.m2, self.X, self.y, cv=10, scoring='neg_mean_absolute_error')
+
+        # Get mean mae estimate obtained from CV
+        self.mae_subset = mae_subset['test_score'].mean()
+        self.mae_all = mae_all['test_score'].mean()
 
     def create_results(self):
         FSS_PSO_Builder.d['best cost'].append(self.cost)
-        FSS_PSO_Builder.d['subset performance'].append(self.subset_performance)
-        FSS_PSO_Builder.d['full dataset performance'].append(self.wholeset_performance)
+        FSS_PSO_Builder.d['r2 (subset)'].append(self.r2_subset)
+        FSS_PSO_Builder.d['r2 (all)'].append(self.r2_all)        
+        FSS_PSO_Builder.d['msle (subset)'].append(self.msle_subset)
+        FSS_PSO_Builder.d['msle (all)'].append(self.msle_all)
+        FSS_PSO_Builder.d['mae (subset)'].append(self.mae_subset)
+        FSS_PSO_Builder.d['mae (all)'].append(self.msle_all)       
         FSS_PSO_Builder.d['ratio selected'].append(self.selected_features_ratio)
         FSS_PSO_Builder.d['selected features'].append(self.__get_feature_col_names())#data is global - consider changing this
 
@@ -163,10 +190,24 @@ class FSS_PSO_Builder:
         indices = [i for i, x in enumerate(self.pos) if x == 1]
         cols = [self.columns[i] for i in indices]
 
-        return cols            
+        return cols
+    
+    def viz_cost_history(self):
+
+        plot_cost_history(cost_history=self.optimizer.mean_neighbor_history)
+        plt.show()
+
+    def viz_scatter_plot_matrix(self):
+        X_selected_features = self.X[:,self.pos==1]
+        df1 = pd.DataFrame(X_selected_features)
+
+        #df1['labels'] = pd.Series(y)
+
+        sns.pairplot(df1,height=5, aspect=.8, kind="reg")
+        plt.show()            
     
     def build(self):
-        return FSS_PSO(self.columns, self.optimizer, self.cost,  self.pos, self.subset_performance, self.wholeset_performance, self.selected_features_ratio, FSS_PSO_Builder.d)
+        return FSS_PSO(self.columns, self.optimizer, self.cost,  self.pos, self.selected_features_ratio, FSS_PSO_Builder.d)
         
         #a.do_cross_val()
         #a.count_selected_features()    
@@ -174,16 +215,13 @@ class FSS_PSO_Builder:
 
 class FSS_PSO:
     
-    
-
-    def __init__(self, columns, optimizer, cost, pos, subset_performance,wholeset_performance,  selected_features_ratio, results):
+    def __init__(self, columns, optimizer, cost, pos,  selected_features_ratio, results):
         #all initialisations from builder
         self.columns = columns
         self.optimizer = optimizer
         self.cost = cost
         self.pos = pos
-        self.subset_performance = subset_performance
-        self.wholeset_performance = wholeset_performance
+
         self.selected_features_ratio = selected_features_ratio
         self.results = results
         #new shit
@@ -196,9 +234,6 @@ class FSS_PSO:
         results.to_csv('results.csv')
 
         return results
-
-
-
 
     def get_selected_feature_history(self):
         flat_feat_freq_list = self.__flatten(self.results['selected features'])
@@ -215,44 +250,50 @@ class FSS_PSO:
         plt.bar(feat_freq_dict.keys(), feat_freq_dict.values())
         plt.show()
 
+
+
 #OF Expressions
 
 def OF_equation(obj_1, obj_2, alpha):
     #print(obj_1)
     j = (alpha * (1-obj_1) + (1.0 - alpha) * (obj_2))
     return j
-        
-    
+
 #GLOBALS
 candidate_solutions = {}
 #d = {'best cost': [], 'subset performance': [], 'fitness stedv': [],'full dataset performance': [], 'ratio selected':[],'selected features': []}
-
-
 options = {'c1': 0.5, 'c2': 0.5, 'w':0.3, 'k': 30, 'p':2}
 data = pd.read_excel('drivPoints.xlsx')
 regressor = linear_model.LinearRegression()
 m1 = linear_model.LinearRegression()
 m2 = linear_model.LinearRegression()
 
-#partially initialise
-a = FSS_PSO_Builder(options, data, 30,10,regressor,r2, 0.5,OF_equation, m1,m2)
-#initialise other fields
-a.do_cross_val()
-a.count_selected_features()
-#add results
-a.create_results()
-#reset optimiser for next iteration
-a.optimizer.reset()
-#partially initialise
-a = FSS_PSO_Builder(options, data, 30,10,regressor,r2, 0.5,OF_equation, m1,m2)
-#initialise other fields
-a.do_cross_val()
-a.count_selected_features()
-#add results
-a.create_results()
-#reset optimiser for next iteration
-a.optimizer.reset()
 
+
+def run(n):
+
+    for x in range(n):
+
+        #Mandatory function calls
+
+        #partially initialise
+        a = FSS_PSO_Builder(options, data, 30,10,regressor,r2, 0.5,OF_equation, m1,m2)
+        #initialise other fields
+        a.count_selected_features()
+        a.do_cross_val()
+        #add results
+        a.create_results()
+
+        #optional function calls
+        a.viz_cost_history()
+        a.viz_scatter_plot_matrix()
+
+        #reset optimiser for next iteration
+        a.optimizer.reset()
+    return a
+
+
+a = run(2)
 #build fully initialised object
 b = a.build()
 #save results as csv
