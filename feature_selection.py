@@ -18,10 +18,13 @@ from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
 class FSS_PSO_Builder:
 
 
-    d = {'best cost': [], 'msle (subset)': [],'msle (all)':[], 'r2 (subset)':[], 'r2 (all)':[], 'mae (subset)':[], 'mae (all)':[],'ratio selected':[],'selected features': []}
+    d = {'best fitness error': [], 'best fitness stdv':[],'msle (subset)': [],'msle (all)':[], 'r2 (subset)':[], 'r2 (all)':[], 'mae (subset)':[], 'mae (all)':[],'ratio selected':[],'selected features': []}
     #data = pd.read_excel(file_name)
     # performance_metric -> pass in list of sklearn metrics later
     def __init__(self, options, data, n_particles,it, regressor ,performance_metric,alpha, obj_function_equation, final_eval_ML_model_1, final_eval_ML_model_2):
+        self.temp_best_cost = None
+        self.cost_stdv = None
+
         index = len(data.columns)
         self.X = (data.iloc[:, 0:index-1]).to_numpy()
         self.y = (data.iloc[:, -1]).to_numpy()
@@ -33,7 +36,15 @@ class FSS_PSO_Builder:
         self.obj_function_equation = obj_function_equation
         self.optimizer = ps.discrete.BinaryPSO(n_particles=n_particles, dimensions=self.dimensions, options=options)# Call instance of PSO
         self.cost, self.pos = self.optimizer.optimize(self.f,  iters=it, verbose=True, X=self.X, y=self.y, performance_metric = performance_metric, alpha=alpha)# Perform optimization
-    
+        
+
+
+        
+    def __set_best_fitness_err_stdv(self, min_fit_error, associated_stdv):
+        if ((self.temp_best_cost is None) or (min_fit_error < self.temp_best_cost)):
+            self.temp_best_cost = min_fit_error
+            self.cost_stdv = associated_stdv
+
     def f(self, swarm, X,y, performance_metric,alpha):
         """Higher-level method to do classification/regression in the
         whole swarm.
@@ -57,14 +68,25 @@ class FSS_PSO_Builder:
         
         n_particles = swarm.shape[0]
 
+        #document shape of this data structure j = [(mean_1, stdev_1),....,(mean_it, stdev_it)]
         j = [
             self.f_per_particle(swarm[particle], alpha, X, y, performance_metric) 
-            for particle in range(n_particles)
+                for particle in range(n_particles)
             ]
-        
-        print(min(j))
-        print(j.index(min(j)))
-        return np.array(j)
+        fitness_err_mean, fitness_err_stdv = zip(*j)
+
+        #best (smallest error) particle's stdv in swarm
+        min_fitness_err = min(fitness_err_mean)
+        mindex = fitness_err_mean.index(min_fitness_err)
+        min_fitness_err_stdv = fitness_err_stdv[mindex]
+
+        print(min_fitness_err)
+        print(min_fitness_err_stdv)
+
+        self.__set_best_fitness_err_stdv(min_fitness_err, min_fitness_err_stdv)
+
+        return np.array(fitness_err_mean)
+
     def f_per_particle(self,m, alpha, X, y, P):
         """Computes for the objective function per particle
 
@@ -96,9 +118,12 @@ class FSS_PSO_Builder:
         #Particle fittness error/loss computed using cross validation
         fitness_error = make_scorer(self.__objective_fcn,  ratio_selected_features=ratio_selected_features, P=P, alpha=alpha)
         scores = cross_val_score(self.regressor, X_subset, y, cv=10, scoring=fitness_error)
-    
-        j = scores.mean()
-        return j
+        particle_fitness_err_mean = scores.mean()
+
+        #Stdev 
+        particle_fitness_err_stdev = np.std(scores)
+
+        return (particle_fitness_err_mean, particle_fitness_err_stdev)
 
     def __objective_fcn(self, y_true, y_pred, **kwargs):
 
@@ -159,15 +184,20 @@ class FSS_PSO_Builder:
         self.mae_all = mae_all['test_score'].mean()
 
     def create_results(self):
-        FSS_PSO_Builder.d['best cost'].append(self.cost)
+        FSS_PSO_Builder.d['best fitness error'].append(self.cost)
+        FSS_PSO_Builder.d['best fitness stdv'].append(self.cost_stdv)
         FSS_PSO_Builder.d['r2 (subset)'].append(self.r2_subset)
         FSS_PSO_Builder.d['r2 (all)'].append(self.r2_all)        
         FSS_PSO_Builder.d['msle (subset)'].append(self.msle_subset)
         FSS_PSO_Builder.d['msle (all)'].append(self.msle_all)
         FSS_PSO_Builder.d['mae (subset)'].append(self.mae_subset)
         FSS_PSO_Builder.d['mae (all)'].append(self.msle_all)       
-        FSS_PSO_Builder.d['ratio selected'].append(self.selected_features_ratio)
+        #FSS_PSO_Builder.d['ratio selected'].append(self.selected_features_ratio)
+        FSS_PSO_Builder.d['ratio selected'].append(self.num_selected)
         FSS_PSO_Builder.d['selected features'].append(self.__get_feature_col_names())#data is global - consider changing this
+
+        
+         
 
         
     def count_selected_features(self):
@@ -242,13 +272,15 @@ class FSS_PSO:
     def __flatten(self,t):
         return [item for sublist in t for item in sublist]
 
-    def plot_feat_frequency(self,):
+    def plot_feat_frequency(self):
 
         flat_list = self.get_selected_feature_history()
 
         feat_freq_dict = dict((x,flat_list.count(x)) for x in set(flat_list))
         plt.bar(feat_freq_dict.keys(), feat_freq_dict.values())
         plt.show()
+    
+    def 
 
 
 
@@ -277,7 +309,7 @@ def run(n):
         #Mandatory function calls
 
         #partially initialise
-        a = FSS_PSO_Builder(options, data, 30,10,regressor,r2, 0.5,OF_equation, m1,m2)
+        a = FSS_PSO_Builder(options, data, 30,7,regressor,r2, 0.5,OF_equation, m1,m2)
         #initialise other fields
         a.count_selected_features()
         a.do_cross_val()
@@ -285,16 +317,18 @@ def run(n):
         a.create_results()
 
         #optional function calls
-        a.viz_cost_history()
-        a.viz_scatter_plot_matrix()
+        #a.viz_cost_history()
+        #a.viz_scatter_plot_matrix()
 
         #reset optimiser for next iteration
         a.optimizer.reset()
     return a
 
 
-a = run(2)
+a = run(1)
 #build fully initialised object
+
+#aggregated results and result viz
 b = a.build()
 #save results as csv
 b.save_results_csv()
