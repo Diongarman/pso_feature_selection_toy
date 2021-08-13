@@ -12,7 +12,7 @@ from sklearn.metrics import roc_auc_score, make_scorer
 from sklearn.metrics import mean_squared_error as mse
 from sklearn.metrics import r2_score as r2
 from sklearn.model_selection import cross_val_score, cross_validate
-from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
 
 
 from sklearn.datasets import make_regression
@@ -31,7 +31,7 @@ df['labels'] = y
 
 #regressor = linear_model.LinearRegression()
 #regressor = RandomForestRegressor(max_depth=2)
-regressor = GradientBoostingRegressor(n_estimators=100, learning_rate=0.1, max_depth=1, random_state=0, loss='ls')
+regressor = GradientBoostingRegressor(n_estimators=2, learning_rate=0.1, max_depth=1, random_state=0, loss='ls')
 
 #measure fitness error - optimiser aims to find minima solution
 def objective_fcn(y_true, y_pred, **kwargs):
@@ -54,6 +54,7 @@ def objective_fcn(y_true, y_pred, **kwargs):
         alpha: The balancing value
     
     """
+ 
     p = kwargs['P'](y_true,y_pred) #objective 1
     #kwargs['ratio_selected_features'] is objective 2
     
@@ -142,15 +143,15 @@ optimizer = ps.discrete.BinaryPSO(n_particles=30, dimensions=dimensions, options
 cost, pos = optimizer.optimize(f,  iters=100, verbose=True, X=X, y=y, performance_metric = r2, alpha=0.5)
 
 # Create two instances of LinearRegression
-r1 = linear_model.LinearRegression()
-r2 = linear_model.LinearRegression()
+r1 = GradientBoostingRegressor(n_estimators=2, learning_rate=0.1, max_depth=1, random_state=0, loss='ls')
+r2 = GradientBoostingRegressor(n_estimators=2, learning_rate=0.1, max_depth=1, random_state=0, loss='ls')
 
 # Get the selected features from the final positions
 X_selected_features = X[:,pos==1]  # subset
 
 # Compute performance using CV
-scores = cross_validate(r1, X_selected_features, y, cv=10, scoring='r2')
-scores2 = cross_validate(r2, X, y, cv=10, scoring='r2')
+scores = cross_validate(r1, X_selected_features, y, cv=10, scoring='neg_root_mean_squared_error')
+scores2 = cross_validate(r2, X, y, cv=10, scoring='neg_root_mean_squared_error')
 
 subset_performance = scores['test_score'].mean()
 wholeset_performance = scores2['test_score'].mean()

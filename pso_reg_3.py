@@ -13,7 +13,7 @@ from sklearn.metrics import roc_auc_score, make_scorer
 from sklearn.metrics import mean_squared_error as mse
 from sklearn.metrics import r2_score as r2
 from sklearn.model_selection import cross_val_score, cross_validate
-from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
 
 for file_name in glob.glob('*.xlsx'):
 
@@ -37,10 +37,20 @@ df['labels'] = y
 #sns.pairplot(df,height=5, aspect=.8, kind="reg").fig.set_size_inches(10,10)
 
 #plt.show()
+                                                    ##########
+                                                    # GLOBALS #
+                                                    ##########
+regressor = linear_model.LinearRegression()
+m1 = linear_model.LinearRegression()
+m2 = linear_model.LinearRegression()
 
-#regressor = linear_model.LinearRegression()
-#regressor = RandomForestRegressor(max_depth=2)
-#regressor = GradientBoostingRegressor(n_estimators=100, learning_rate=0.1, max_depth=1, random_state=0, loss='ls')
+#regressor = RandomForestRegressor(n_estimators=2,max_depth=2)
+# m1 = RandomForestRegressor(n_estimators=2,max_depth=2)
+# m2 = RandomForestRegressor(n_estimators=2,max_depth=2)
+
+# regressor = GradientBoostingRegressor(n_estimators=5, learning_rate=0.1, max_depth=10, random_state=0, loss='ls')
+# m1 = GradientBoostingRegressor(n_estimators=100, learning_rate=0.1, max_depth=10, random_state=0, loss='ls')
+# m2 = GradientBoostingRegressor(n_estimators=100, learning_rate=0.1, max_depth=10, random_state=0, loss='ls')
 
 #measure fitness error - optimiser aims to find minima solution
 def objective_fcn(y_true, y_pred, **kwargs):
@@ -64,6 +74,7 @@ def objective_fcn(y_true, y_pred, **kwargs):
     
     """
     p = kwargs['P'](y_true,y_pred) #objective 1
+    #print(kwargs['P'])
     #kwargs['ratio_selected_features'] is objective 2
     
     j = obj_function_equation(p, kwargs['ratio_selected_features'], kwargs['alpha'])
@@ -71,10 +82,11 @@ def objective_fcn(y_true, y_pred, **kwargs):
     return j
 
 def obj_function_equation(obj_1, obj_2, alpha):
+    #print(obj_1)
     j = (alpha * (1-obj_1) + (1.0 - alpha) * (obj_2))
     return j
 
-def f_per_particle(m, alpha, X, y, P, ML_Algo):
+def f_per_particle(m, alpha, X, y, P):
     """Computes for the objective function per particle
 
     Inputs
@@ -104,11 +116,11 @@ def f_per_particle(m, alpha, X, y, P, ML_Algo):
     
     #Particle fittness error/loss computed using cross validation
     fitness_error = make_scorer(objective_fcn,  ratio_selected_features=ratio_selected_features, P=P, alpha=alpha)
-    scores = cross_val_score(ML_Algo, X_subset, y, cv=10, scoring=fitness_error)
+    scores = cross_val_score(regressor, X_subset, y, cv=10, scoring=fitness_error)
   
     j = scores.mean()
     return j
-def f(swarm, X,y, performance_metric,alpha, ML_Algo):
+def f(swarm, X,y, performance_metric,alpha):
     """Higher-level method to do classification/regression in the
     whole swarm.
 
@@ -131,7 +143,7 @@ def f(swarm, X,y, performance_metric,alpha, ML_Algo):
     
     n_particles = swarm.shape[0]
 
-    j = [f_per_particle(swarm[particle], alpha, X, y, performance_metric, ML_Algo) for particle in range(n_particles)]
+    j = [f_per_particle(swarm[particle], alpha, X, y, performance_metric) for particle in range(n_particles)]
     return np.array(j)
 
                                         ###############
@@ -155,20 +167,19 @@ def get_feature_col_names(data, bit_list):
 
     return cols
 
-def instantiate_and_perform_pso(options, X, y, n_particles,it, performance_metric, ML_Algo):
-        ########################################
+def instantiate_and_perform_pso(options, X, y, n_particles,it, performance_metric):
+    ########################################
     # Instantiate and perform optimisation #
     ########################################
     dimensions = X.shape[1]# dimensions should be the number of features
     optimizer = ps.discrete.BinaryPSO(n_particles=n_particles, dimensions=dimensions, options=options)# Call instance of PSO
-    cost, pos = optimizer.optimize(f,  iters=it, verbose=True, X=X, y=y, performance_metric = performance_metric, ML_Algo = ML_Algo(), alpha=0.5)# Perform optimization
+    cost, pos = optimizer.optimize(f,  iters=it, verbose=True, X=X, y=y, performance_metric = performance_metric, alpha=0.5)# Perform optimization
 
     return cost, pos, optimizer
 
 
 
-def get_metrics( X, y, pos, cost,ML_Algo):
-
+def get_metrics( X, y, pos, cost):
 
 
     
@@ -176,11 +187,6 @@ def get_metrics( X, y, pos, cost,ML_Algo):
     # Get optimisation performance metrics # 
     ########################################
      
-      
-    # Create two instances of whatever ML Algorithm is selected - for comparing performances with an without
-    m1 = ML_Algo()
-    m2 = ML_Algo()
-
     # Get the selected features from the final positions
     X_selected_features = X[:,pos==1]# subset
 
@@ -238,27 +244,30 @@ options = {'c1': 0.5, 'c2': 0.5, 'w':0.3, 'k': 30, 'p':2} #arbitary
 #get results
 d = {'best cost': [], 'subset performance': [], 'full dataset performance': [], 'ratio selected':[],'selected features': []}
 
+def plot_feat_frequency(flat_list):
+    feat_freq_dict = dict((x,flat_list.count(x)) for x in set(flat_list))
+    plt.bar(feat_freq_dict.keys(), feat_freq_dict.values())
+    plt.show()
 
 def main(a):
     global results
     for x in range(a):
         
         #stantiate and perform PSO
-        cost, pos, opt = instantiate_and_perform_pso(options, X,y, 30,100, r2, linear_model.LinearRegression)
+        cost, pos, opt = instantiate_and_perform_pso(options, X,y, 30,100, r2)
 
-        results = create_results(d, *get_metrics(X,y,  pos,cost,linear_model.LinearRegression), pos)
+        results = create_results(d, *get_metrics(X,y,  pos,cost), pos)
 
         #viz(pos, opt)
         
 
 
         opt.reset()
-main(10)
+main(1)
 with pd.option_context('display.max_rows', None, 'display.max_columns', None):  # more options can be specified also
     print(results)
-    collection = flatten(results['selected features'].tolist())
-    feat_freq_dict = dict((x,collection.count(x)) for x in set(collection))
+    results.to_csv('results.csv')
 
-    plt.bar(feat_freq_dict.keys(), feat_freq_dict.values())
-    plt.show()
+    flat_feat_freq_list = flatten(results['selected features'].tolist())
+    plot_feat_frequency(flat_feat_freq_list)
 

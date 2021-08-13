@@ -1,0 +1,3 @@
+,best cost,subset performance,full dataset performance,ratio selected,selected features
+0,0.16114885999678275,0.8541728682417288,0.9286400128879144,3/17,"['imgNum', 'wF', 'yRM']"
+1,0.21818202702213157,0.916577122426325,0.9286400128879144,6/17,"['ang', 'xF', 'wF', 'hF', 'xN', 'yRM']"
