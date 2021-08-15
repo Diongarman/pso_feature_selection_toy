@@ -8,12 +8,17 @@ import matplotlib.pyplot as plt
 import pyswarms as ps
 from pyswarms.utils.plotters import plot_cost_history
 # sklearn imports
+# learning algos
 from sklearn import linear_model
+from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
+# metrics
 from sklearn.metrics import roc_auc_score, make_scorer
 from sklearn.metrics import mean_squared_error as mse
 from sklearn.metrics import r2_score as r2
+# CV
 from sklearn.model_selection import cross_val_score, cross_validate
-from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
+
+from abc import ABC, abstractmethod
 
 class FSS_PSO_Builder:
 
@@ -25,25 +30,41 @@ class FSS_PSO_Builder:
         self.temp_best_cost = None
         self.cost_stdv = None
 
-        index = len(data.columns)
-        self.X = (data.iloc[:, 0:index-1]).to_numpy()
-        self.y = (data.iloc[:, -1]).to_numpy()
+        self.X, self.y = self.__import_data(data)
+        
         self.dimensions = self.X.shape[1]# dimensions should be the number of features
         self.columns = list(data.columns)
-        self.regressor = regressor
+
+        self.regressor = regressor #drives fitness function
+
+        #Post optimsiation evaluation metrics
         self.m1 = final_eval_ML_model_1
         self.m2 = final_eval_ML_model_2
+
         self.obj_function_equation = obj_function_equation
         self.optimizer = ps.discrete.BinaryPSO(n_particles=n_particles, dimensions=self.dimensions, options=options)# Call instance of PSO
         self.cost, self.pos = self.optimizer.optimize(self.f,  iters=it, verbose=True, X=self.X, y=self.y, performance_metric = performance_metric, alpha=alpha)# Perform optimization
         
+    def __import_data(self, data):
+        index = len(self.columns)
+        X = (data.iloc[:, 0:index-1]).to_numpy()
+        y = (data.iloc[:, -1]).to_numpy()
+        return X, y
+    # def __set_best_fitness_err_stdv(self, min_fit_error, associated_stdv):
+    #     if ((self.temp_best_cost is None) or (min_fit_error < self.temp_best_cost)):
+    #         self.temp_best_cost = min_fit_error
+    #         self.cost_stdv = associated_stdv
+    def __set_best_fitness_err_stdv(self, fitness_err_mean, fitness_err_stdv):
 
+        #find minimum fitness error and it's associated stdev
+        min_fitness_err = min(fitness_err_mean)
+        mindex = fitness_err_mean.index(min_fitness_err)
+        min_fitness_err_stdv = fitness_err_stdv[mindex]
 
-        
-    def __set_best_fitness_err_stdv(self, min_fit_error, associated_stdv):
-        if ((self.temp_best_cost is None) or (min_fit_error < self.temp_best_cost)):
-            self.temp_best_cost = min_fit_error
-            self.cost_stdv = associated_stdv
+        #Store record best (minimum) cost and it's stdev 
+        if ((self.temp_best_cost is None) or (min_fitness_err < self.temp_best_cost)):
+            self.temp_best_cost = min_fitness_err
+            self.cost_stdv = min_fitness_err_stdv 
 
     def f(self, swarm, X,y, performance_metric,alpha):
         """Higher-level method to do classification/regression in the
@@ -73,19 +94,11 @@ class FSS_PSO_Builder:
             self.f_per_particle(swarm[particle], alpha, X, y, performance_metric) 
                 for particle in range(n_particles)
             ]
-        fitness_err_mean, fitness_err_stdv = zip(*j)
+        fitness_error_mean, fitness_error_stdv = zip(*j)
 
-        #best (smallest error) particle's stdv in swarm
-        min_fitness_err = min(fitness_err_mean)
-        mindex = fitness_err_mean.index(min_fitness_err)
-        min_fitness_err_stdv = fitness_err_stdv[mindex]
+        self.__set_best_fitness_err_stdv(fitness_error_mean, fitness_error_stdv)
 
-        print(min_fitness_err)
-        print(min_fitness_err_stdv)
-
-        self.__set_best_fitness_err_stdv(min_fitness_err, min_fitness_err_stdv)
-
-        return np.array(fitness_err_mean)
+        return np.array(fitness_error_mean)
 
     def f_per_particle(self,m, alpha, X, y, P):
         """Computes for the objective function per particle
@@ -239,8 +252,7 @@ class FSS_PSO_Builder:
     def build(self):
         return FSS_PSO(self.columns, self.optimizer, self.cost,  self.pos, self.selected_features_ratio, FSS_PSO_Builder.d)
         
-        #a.do_cross_val()
-        #a.count_selected_features()    
+ 
 
 
 class FSS_PSO:
@@ -258,9 +270,12 @@ class FSS_PSO:
     
     def save_results_csv(self):
         results = pd.DataFrame(data=self.results)
+
+        #show results
         with pd.option_context('display.max_rows', None, 'display.max_columns', None):  # more options can be specified also
             print(results)
-
+        
+        #Save results
         results.to_csv('results.csv')
 
         return results
@@ -280,8 +295,13 @@ class FSS_PSO:
         plt.bar(feat_freq_dict.keys(), feat_freq_dict.values())
         plt.show()
     
-    def 
+    def plot_subset_size_hist(self):
+        results = pd.DataFrame(data=self.results)
+        print(results["ratio selected"])
 
+        sns.histplot(data=results, x="ratio selected", stat="count", discrete=True)
+        #sns.distplot(results["ratio selected"])
+        plt.show()
 
 
 #OF Expressions
@@ -296,12 +316,14 @@ candidate_solutions = {}
 #d = {'best cost': [], 'subset performance': [], 'fitness stedv': [],'full dataset performance': [], 'ratio selected':[],'selected features': []}
 options = {'c1': 0.5, 'c2': 0.5, 'w':0.3, 'k': 30, 'p':2}
 data = pd.read_excel('drivPoints.xlsx')
+
+#abstract base class
 regressor = linear_model.LinearRegression()
 m1 = linear_model.LinearRegression()
 m2 = linear_model.LinearRegression()
 
 
-
+#put all below into a main() function
 def run(n):
 
     for x in range(n):
@@ -309,7 +331,7 @@ def run(n):
         #Mandatory function calls
 
         #partially initialise
-        a = FSS_PSO_Builder(options, data, 30,7,regressor,r2, 0.5,OF_equation, m1,m2)
+        a = FSS_PSO_Builder(options, data, 30,2,regressor,r2, 0.5,OF_equation, m1,m2)
         #initialise other fields
         a.count_selected_features()
         a.do_cross_val()
@@ -325,7 +347,7 @@ def run(n):
     return a
 
 
-a = run(1)
+a = run(50)
 #build fully initialised object
 
 #aggregated results and result viz
@@ -336,5 +358,6 @@ b.save_results_csv()
 #reset optimiser
 b.optimizer.reset()
 #visualisations
+b.plot_subset_size_hist()
 b.plot_feat_frequency()
 
