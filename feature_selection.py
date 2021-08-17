@@ -26,14 +26,17 @@ class FSS_PSO_Builder:
     d = {'best fitness error': [], 'best fitness stdv':[],'msle (subset)': [],'msle (all)':[], 'r2 (subset)':[], 'r2 (all)':[], 'mae (subset)':[], 'mae (all)':[],'ratio selected':[],'selected features': []}
     #data = pd.read_excel(file_name)
     # performance_metric -> pass in list of sklearn metrics later
-    def __init__(self, options, data, n_particles,it, regressor ,performance_metric,alpha, obj_function_equation, final_eval_ML_model_1, final_eval_ML_model_2):
+    def __init__(self, data,options, n_particles,it, regressor ,performance_metric,alpha, obj_function_equation, final_eval_ML_model_1, final_eval_ML_model_2):
         self.temp_best_cost = None
         self.cost_stdv = None
-
+        
+        self.columns = list(data.columns)
         self.X, self.y = self.__import_data(data)
         
         self.dimensions = self.X.shape[1]# dimensions should be the number of features
-        self.columns = list(data.columns)
+        
+
+        
 
         self.regressor = regressor #drives fitness function
 
@@ -130,7 +133,7 @@ class FSS_PSO_Builder:
         
         #Particle fittness error/loss computed using cross validation
         fitness_error = make_scorer(self.__objective_fcn,  ratio_selected_features=ratio_selected_features, P=P, alpha=alpha)
-        scores = cross_val_score(self.regressor, X_subset, y, cv=10, scoring=fitness_error)
+        scores = cross_val_score(self.regressor, X_subset, y, cv=10, scoring=fitness_error) #does first 4 steps of k-fold CV
         particle_fitness_err_mean = scores.mean()
 
         #Stdev 
@@ -140,7 +143,7 @@ class FSS_PSO_Builder:
 
     def __objective_fcn(self, y_true, y_pred, **kwargs):
 
-        """ Higher-level function to compue the objective function value for a particle 
+        """ Higher-level function to compute the objective function value for a particle 
         
         Inputs
         ------
@@ -159,7 +162,8 @@ class FSS_PSO_Builder:
         
         """
         p = kwargs['P'](y_true,y_pred) #objective 1
-        #print(kwargs['P'])
+        print('P',p)
+        print('Ratio',kwargs['ratio_selected_features'])
         #kwargs['ratio_selected_features'] is objective 2
         
         j = self.obj_function_equation(p, kwargs['ratio_selected_features'], kwargs['alpha'])
@@ -252,8 +256,6 @@ class FSS_PSO_Builder:
     def build(self):
         return FSS_PSO(self.columns, self.optimizer, self.cost,  self.pos, self.selected_features_ratio, FSS_PSO_Builder.d)
         
- 
-
 
 class FSS_PSO:
     
@@ -306,32 +308,81 @@ class FSS_PSO:
 
 #OF Expressions
 
-def OF_equation(obj_1, obj_2, alpha):
+def OF_equation_scorer(obj_1, obj_2, alpha):
     #print(obj_1)
     j = (alpha * (1-obj_1) + (1.0 - alpha) * (obj_2))
     return j
 
+def OF_equation_mse(obj_1, obj_2, alpha):
+    #print(obj_1)
+    j = (alpha * (obj_1) + (1.0 - alpha) * (obj_2))
+    return j
+
 #GLOBALS
 candidate_solutions = {}
-#d = {'best cost': [], 'subset performance': [], 'fitness stedv': [],'full dataset performance': [], 'ratio selected':[],'selected features': []}
-options = {'c1': 0.5, 'c2': 0.5, 'w':0.3, 'k': 30, 'p':2}
 data = pd.read_excel('drivPoints.xlsx')
 
-#abstract base class
-regressor = linear_model.LinearRegression()
-m1 = linear_model.LinearRegression()
-m2 = linear_model.LinearRegression()
+def setup_pso_builder(config, data, builder):
+
+    regressor = None
+
+    optimisation_models = {
+        'LR': linear_model.LinearRegression(),
+        'RFR': RandomForestRegressor(n_estimators=2,max_depth=2) 
+    }
+
+    if config['optimisation_model'] in optimisation_models:
+        regressor = optimisation_models[config['optimisation_model']]
+
+    m1 = None
+    m2 = None
+
+    evaluation_models = {
+        'LR': linear_model.LinearRegression(),
+        'RFR': RandomForestRegressor(n_estimators=2,max_depth=2) 
+    }
+
+    if config['eval_model_post_optimisation'] in evaluation_models:
+        m1 = evaluation_models[config['eval_model_post_optimisation']]
+        m2 = evaluation_models[config['eval_model_post_optimisation']]
+
+    #set OF equation based upon this
+    performance_metrics = {
+        'R2': r2,
+        'MSE': mse
+
+    }
+
+    objective_fcns = {
+        'R2': OF_equation_scorer,
+        'MSE': OF_equation_mse
+    }
+
+    if config['performance_metric'] in performance_metrics:
+        performance_metric = performance_metrics[config['performance_metric']]
+        obj_fcn = objective_fcns[config['performance_metric']]
+
+    n_particles = config['n_particles']
+    iterations = config['iterations']
+
+    keys_to_extract = ["c1", "c2", "w", "k", "p"]
+    
+    options = {key: config[key] for key in keys_to_extract}
+
+    a = builder(data, options, n_particles, iterations, regressor,performance_metric, config['alpha_balancing_coefficient'], obj_fcn, m1, m2 )
 
 
-#put all below into a main() function
-def run(n):
+    return a   
 
-    for x in range(n):
+def run(config):
+    
+    for x in range(config['runs']):
 
         #Mandatory function calls
 
         #partially initialise
-        a = FSS_PSO_Builder(options, data, 30,2,regressor,r2, 0.5,OF_equation, m1,m2)
+        a = setup_pso_builder(parameter_config, data, FSS_PSO_Builder)
+        #a = FSS_PSO_Builder(options, data, 100,2,regressor,mse, 0.5,OF_equation_mse, m1,m2)
         #initialise other fields
         a.count_selected_features()
         a.do_cross_val()
@@ -339,25 +390,49 @@ def run(n):
         a.create_results()
 
         #optional function calls
-        #a.viz_cost_history()
-        #a.viz_scatter_plot_matrix()
 
-        #reset optimiser for next iteration
+        if config['save_performance_cost']:
+            a.viz_cost_history()
+
+        if config['save_scatter_plot_matrix']:
+            a.viz_scatter_plot_matrix()
+
+        #reset optimiser for next run of PSO
         a.optimizer.reset()
     return a
 
 
-a = run(50)
-#build fully initialised object
+def aggregate_optional_functions(config, post_runs):
+    aggregate_of_runs = post_runs.build()
 
-#aggregated results and result viz
-b = a.build()
-#save results as csv
-b.save_results_csv()
-#save solution - later get code running first
-#reset optimiser
-b.optimizer.reset()
-#visualisations
-b.plot_subset_size_hist()
-b.plot_feat_frequency()
+    aggregate_of_runs.save_results_csv()
 
+    if config['plot_subset_size_histo']:
+        aggregate_of_runs.plot_subset_size_hist()
+    if config['plot_feature_frequency']:
+        aggregate_of_runs.plot_feat_frequency()
+
+parameter_config = {
+    'runs': 5, #each run will produce a subset
+    #OF Parameters
+    'optimisation_model': 'LR',
+    'performance_metric': 'R2',
+    'eval_model_post_optimisation':'LR',
+    'alpha_balancing_coefficient': 0.5,
+    #pso optimiser swarm parameters
+    'n_particles':30,
+    'iterations':5,
+    #pso hyperparameters
+    'c1': 0.5, 'c2': 0.5, 'w':0.3, 'k': 30, 'p':2,
+    #optional functionality parameters
+    'save_performance_cost': False,
+    'save_scatter_plot_matrix': True,
+    'save_evaluation_results': True,
+    'plot_subset_size_histo': True,
+    'plot_feature_frequency': True,
+    
+}
+
+a = run(parameter_config)
+
+aggregate_optional_functions(parameter_config, a)
