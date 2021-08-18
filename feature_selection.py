@@ -19,11 +19,12 @@ from sklearn.metrics import r2_score as r2
 from sklearn.model_selection import cross_val_score, cross_validate
 
 from abc import ABC, abstractmethod
+from codetiming import Timer
 
 class FSS_PSO_Builder:
-
-
-    d = {'best fitness error': [], 'best fitness stdv':[],'msle (subset)': [],'msle (all)':[], 'r2 (subset)':[], 'r2 (all)':[], 'mae (subset)':[], 'mae (all)':[],'ratio selected':[],'selected features': []}
+    #results data aggregated over multiple runs
+    cost_histories = []
+    d = {'best fitness error': [], 'best fitness stdv':[],'msle (subset)': [],'msle (all)':[], 'r2 (subset)':[], 'r2 (all)':[], 'mae (subset)':[], 'mae (all)':[],'ratio selected':[],'selected features': [], 'time':[]}
     #data = pd.read_excel(file_name)
     # performance_metric -> pass in list of sklearn metrics later
     def __init__(self, data,options, n_particles,it, regressor ,performance_metric,alpha, obj_function_equation, final_eval_ML_model_1, final_eval_ML_model_2):
@@ -44,10 +45,18 @@ class FSS_PSO_Builder:
         self.m1 = final_eval_ML_model_1
         self.m2 = final_eval_ML_model_2
 
+
         self.obj_function_equation = obj_function_equation
+
+
+        t = Timer(name="class")
+        t.start()
         self.optimizer = ps.discrete.BinaryPSO(n_particles=n_particles, dimensions=self.dimensions, options=options)# Call instance of PSO
         self.cost, self.pos = self.optimizer.optimize(self.f,  iters=it, verbose=True, X=self.X, y=self.y, performance_metric = performance_metric, alpha=alpha)# Perform optimization
-        
+
+
+
+        self.optimisation_time = t.stop()
     def __import_data(self, data):
         index = len(self.columns)
         X = (data.iloc[:, 0:index-1]).to_numpy()
@@ -162,8 +171,8 @@ class FSS_PSO_Builder:
         
         """
         p = kwargs['P'](y_true,y_pred) #objective 1
-        print('P',p)
-        print('Ratio',kwargs['ratio_selected_features'])
+        #print('P',p)
+        #print('Ratio',kwargs['ratio_selected_features'])
         #kwargs['ratio_selected_features'] is objective 2
         
         j = self.obj_function_equation(p, kwargs['ratio_selected_features'], kwargs['alpha'])
@@ -212,6 +221,11 @@ class FSS_PSO_Builder:
         #FSS_PSO_Builder.d['ratio selected'].append(self.selected_features_ratio)
         FSS_PSO_Builder.d['ratio selected'].append(self.num_selected)
         FSS_PSO_Builder.d['selected features'].append(self.__get_feature_col_names())#data is global - consider changing this
+        FSS_PSO_Builder.d['time'].append(self.optimisation_time)
+
+    def save_cost_history(self):
+        #eveytime class is initialised and thus optimiser is run, store the cost history for that iteration in the class variable 'cost_histories'
+        FSS_PSO_Builder.cost_histories.append(self.optimizer.cost_history)
 
         
          
@@ -241,7 +255,9 @@ class FSS_PSO_Builder:
     
     def viz_cost_history(self):
 
-        plot_cost_history(cost_history=self.optimizer.mean_neighbor_history)
+        plot_cost_history(cost_history=self.optimizer.cost_history)
+        #print('mean neighbour history', self.optimizer.mean_neighbor_history)
+        #print(self.optimizer.cost_history)
         plt.show()
 
     def viz_scatter_plot_matrix(self):
@@ -254,12 +270,12 @@ class FSS_PSO_Builder:
         plt.show()            
     
     def build(self):
-        return FSS_PSO(self.columns, self.optimizer, self.cost,  self.pos, self.selected_features_ratio, FSS_PSO_Builder.d)
+        return FSS_PSO(self.columns, self.optimizer, self.cost,  self.pos, self.selected_features_ratio, FSS_PSO_Builder.d, FSS_PSO_Builder.cost_histories)
         
 
 class FSS_PSO:
     
-    def __init__(self, columns, optimizer, cost, pos,  selected_features_ratio, results):
+    def __init__(self, columns, optimizer, cost, pos,  selected_features_ratio, results, cost_histories):
         #all initialisations from builder
         self.columns = columns
         self.optimizer = optimizer
@@ -268,6 +284,7 @@ class FSS_PSO:
 
         self.selected_features_ratio = selected_features_ratio
         self.results = results
+        self.cost_histories = cost_histories
         #new shit
     
     def save_results_csv(self):
@@ -288,6 +305,16 @@ class FSS_PSO:
 
     def __flatten(self,t):
         return [item for sublist in t for item in sublist]
+
+    def cost_histories_box_plots(self):
+
+        df = pd.DataFrame(self.cost_histories)
+
+        print(df)
+
+        sns.boxplot(data=df)
+        sns.swarmplot(data=df)
+        plt.show()
 
     def plot_feat_frequency(self):
 
@@ -321,6 +348,8 @@ def OF_equation_mse(obj_1, obj_2, alpha):
 #GLOBALS
 candidate_solutions = {}
 data = pd.read_excel('drivPoints.xlsx')
+#def excel_config_parser: pass #should return a pandas dataframe, which gets passed to 'setup_pso_builder' to be used in 'builder'
+#data = excel_config_parser()
 
 def setup_pso_builder(config, data, builder):
 
@@ -388,7 +417,8 @@ def run(config):
         a.do_cross_val()
         #add results
         a.create_results()
-
+        #save cost_history
+        a.save_cost_history()
         #optional function calls
 
         if config['save_performance_cost']:
@@ -411,9 +441,10 @@ def aggregate_optional_functions(config, post_runs):
         aggregate_of_runs.plot_subset_size_hist()
     if config['plot_feature_frequency']:
         aggregate_of_runs.plot_feat_frequency()
+    aggregate_of_runs.cost_histories_box_plots()
 
 parameter_config = {
-    'runs': 5, #each run will produce a subset
+    'runs': 25, #each run will produce a subset
     #OF Parameters
     'optimisation_model': 'LR',
     'performance_metric': 'R2',
@@ -421,12 +452,12 @@ parameter_config = {
     'alpha_balancing_coefficient': 0.5,
     #pso optimiser swarm parameters
     'n_particles':30,
-    'iterations':5,
-    #pso hyperparameters
+    'iterations':20,
+    #pso hyperparameters - find out how to tune these by emailing author
     'c1': 0.5, 'c2': 0.5, 'w':0.3, 'k': 30, 'p':2,
     #optional functionality parameters
     'save_performance_cost': False,
-    'save_scatter_plot_matrix': True,
+    'save_scatter_plot_matrix': False,
     'save_evaluation_results': True,
     'plot_subset_size_histo': True,
     'plot_feature_frequency': True,
@@ -436,3 +467,20 @@ parameter_config = {
 a = run(parameter_config)
 
 aggregate_optional_functions(parameter_config, a)
+
+
+#Todo
+#read config file that runs PSO algorithm
+    #do logic
+    #add excel sheet functionality
+        #each row in excel sheet is a 'job'
+#Modularise code
+    #read up on python modules
+
+#Functionality: save into folders categorised by module
+
+#Read
+    #General articles: evaluation metrics, ensemble methods
+    #Journals
+#Other
+    #apply for extension

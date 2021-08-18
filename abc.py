@@ -130,7 +130,7 @@ def aggregate_optional_functions(config, post_runs):
     if config['plot_subset_size_histo']:
         aggregate_of_runs.plot_subset_size_hist()
     if config['plot_feature_frequency']:
-        aggregate_of_runs.
+        aggregate_of_runs.plot_feat_frequency()
 
 
 a = run(parameter_config)
