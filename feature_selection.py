@@ -7,6 +7,8 @@ import matplotlib.pyplot as plt
 # Import PySwarms
 import pyswarms as ps
 from pyswarms.utils.plotters import plot_cost_history
+from pyswarms.utils.search.grid_search import GridSearch
+from pyswarms.utils.search.random_search import RandomSearch
 # sklearn imports
 # learning algos
 from sklearn import linear_model
@@ -21,13 +23,101 @@ from sklearn.model_selection import cross_val_score, cross_validate
 from abc import ABC, abstractmethod
 from codetiming import Timer
 
+#Monkey Patch
+class GridSearchUpdate(RandomSearch):
+    
+    def __init__(        
+        self,
+        optimizer,
+        n_particles,
+        dimensions,
+        options,
+        objective_func,
+        iters,
+        n_selection_iters,
+        bounds=None,
+        velocity_clamp=(0, 1),
+        **kwargs
+    ):
+        
+        super(GridSearchUpdate,self).__init__(
+            optimizer,
+            n_particles,
+            dimensions,
+            options,
+            objective_func,
+            iters,
+            n_selection_iters,
+            bounds=bounds,
+            velocity_clamp=velocity_clamp,
+        )
+        self.kwargs = kwargs
+        # invoke assertions
+        self.assertions()
+    
+    def generate_score(self, options):
+        """Generate score for optimizer's performance on objective function
+
+        Parameters
+        ----------
+
+        options: dict
+            a dict with the following keys: {'c1', 'c2', 'w', 'k', 'p'}
+        """
+
+        # Intialize optimizer
+        f = self.optimizer(
+            self.n_particles, self.dims, options, self.bounds, velocity_clamp=self.vclamp
+        )
+        
+        #print(self.kwargs)
+        #breakpoint()
+
+        # Return score
+        return f.optimize(self.objective_func, iters = self.iters,**self.kwargs)
+    
+    def search(self, maximum=False):
+        import operator as op
+        """Compare optimizer's objective function performance scores
+        for all combinations of provided parameters
+
+        Parameters
+        ----------
+
+        maximum: bool
+            a bool defaulting to False, returning the minimum value for the
+            objective function. If set to True, will return the maximum value
+            for the objective function.
+        """
+
+        # Generate the grid of all hyperparameter value combinations
+        grid = self.generate_grid()
+
+        # Calculate scores for all hyperparameter combinations
+        scores = [self.generate_score(i)[0] for i in grid]
+        
+        print(min(scores))
+        print(len(scores))
+
+        # Default behavior
+        idx, self.best_score = min(enumerate(scores), key=op.itemgetter(1))
+
+        # Catches the maximum bool flag
+        if maximum:
+            idx, self.best_score = max(enumerate(scores), key=op.itemgetter(1))
+
+        # Return optimum hyperparameter value property from grid using index
+        self.best_options = op.itemgetter(idx)(grid)
+        return self.best_score, self.best_options
+
+
 class FSS_PSO_Builder:
     #results data aggregated over multiple runs
     cost_histories = []
     d = {'best fitness error': [], 'best fitness stdv':[],'msle (subset)': [],'msle (all)':[], 'r2 (subset)':[], 'r2 (all)':[], 'mae (subset)':[], 'mae (all)':[],'ratio selected':[],'selected features': [], 'time':[]}
     #data = pd.read_excel(file_name)
     # performance_metric -> pass in list of sklearn metrics later
-    def __init__(self, data,options, n_particles,it, regressor ,performance_metric,alpha, obj_function_equation, final_eval_ML_model_1, final_eval_ML_model_2):
+    def __init__(self, data, options, n_particles,it, regressor ,performance_metric,alpha, obj_function_equation, final_eval_ML_model_1, final_eval_ML_model_2, gridSearch):
         self.temp_best_cost = None
         self.cost_stdv = None
         
@@ -35,9 +125,6 @@ class FSS_PSO_Builder:
         self.X, self.y = self.__import_data(data)
         
         self.dimensions = self.X.shape[1]# dimensions should be the number of features
-        
-
-        
 
         self.regressor = regressor #drives fitness function
 
@@ -47,16 +134,37 @@ class FSS_PSO_Builder:
 
 
         self.obj_function_equation = obj_function_equation
+        if gridSearch:
+
+            # options = {'c1': [1, 2, 3],
+            #             'c2': [1, 2, 3],
+            #             'w' : [2, 3, 5],
+            #             'k' : [5, 10, 15],
+            #             'p' : 1}
+
+            options = {'c1': [1, 5],
+               'c2': [6, 10],
+               'w' : [2, 5],
+               'k' : [11, 15],
+               'p' : 1}
+
+            g = GridSearchUpdate(ps.discrete.BinaryPSO, n_particles=n_particles, dimensions=self.dimensions,
+                    options=options, objective_func=self.f, iters=it, n_selection_iters = 2,X=self.X, y=self.y, performance_metric = performance_metric, alpha=alpha)
+
+            _ , best_options= g.search()
+
+            options = best_options
+
 
 
         t = Timer(name="class")
         t.start()
+        
         self.optimizer = ps.discrete.BinaryPSO(n_particles=n_particles, dimensions=self.dimensions, options=options)# Call instance of PSO
         self.cost, self.pos = self.optimizer.optimize(self.f,  iters=it, verbose=True, X=self.X, y=self.y, performance_metric = performance_metric, alpha=alpha)# Perform optimization
-
-
-
+        
         self.optimisation_time = t.stop()
+
     def __import_data(self, data):
         index = len(self.columns)
         X = (data.iloc[:, 0:index-1]).to_numpy()
@@ -217,7 +325,7 @@ class FSS_PSO_Builder:
         FSS_PSO_Builder.d['msle (subset)'].append(self.msle_subset)
         FSS_PSO_Builder.d['msle (all)'].append(self.msle_all)
         FSS_PSO_Builder.d['mae (subset)'].append(self.mae_subset)
-        FSS_PSO_Builder.d['mae (all)'].append(self.msle_all)       
+        FSS_PSO_Builder.d['mae (all)'].append(self.mae_all)       
         #FSS_PSO_Builder.d['ratio selected'].append(self.selected_features_ratio)
         FSS_PSO_Builder.d['ratio selected'].append(self.num_selected)
         FSS_PSO_Builder.d['selected features'].append(self.__get_feature_col_names())#data is global - consider changing this
@@ -309,13 +417,18 @@ class FSS_PSO:
     def cost_histories_box_plots(self):
 
         df = pd.DataFrame(self.cost_histories)
-
+        
+        avg_line = df.mean().to_frame()
         print(df)
-
+        print(avg_line)
         sns.boxplot(data=df)
         sns.swarmplot(data=df)
+
+        sns.lineplot(data=avg_line)
         plt.show()
 
+
+        
     def plot_feat_frequency(self):
 
         flat_list = self.get_selected_feature_history()
@@ -394,11 +507,12 @@ def setup_pso_builder(config, data, builder):
     n_particles = config['n_particles']
     iterations = config['iterations']
 
+
     keys_to_extract = ["c1", "c2", "w", "k", "p"]
     
     options = {key: config[key] for key in keys_to_extract}
 
-    a = builder(data, options, n_particles, iterations, regressor,performance_metric, config['alpha_balancing_coefficient'], obj_fcn, m1, m2 )
+    a = builder(data, options, n_particles, iterations, regressor,performance_metric, config['alpha_balancing_coefficient'], obj_fcn, m1, m2, gridSearch=config['pso_parameter_gridSearch'] )
 
 
     return a   
@@ -444,7 +558,7 @@ def aggregate_optional_functions(config, post_runs):
     aggregate_of_runs.cost_histories_box_plots()
 
 parameter_config = {
-    'runs': 25, #each run will produce a subset
+    'runs': 10, #each run will produce a subset
     #OF Parameters
     'optimisation_model': 'LR',
     'performance_metric': 'R2',
@@ -452,8 +566,9 @@ parameter_config = {
     'alpha_balancing_coefficient': 0.5,
     #pso optimiser swarm parameters
     'n_particles':30,
-    'iterations':20,
+    'iterations':10,
     #pso hyperparameters - find out how to tune these by emailing author
+    'pso_parameter_gridSearch':True,
     'c1': 0.5, 'c2': 0.5, 'w':0.3, 'k': 30, 'p':2,
     #optional functionality parameters
     'save_performance_cost': False,
