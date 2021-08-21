@@ -7,8 +7,7 @@ import matplotlib.pyplot as plt
 # Import PySwarms
 import pyswarms as ps
 from pyswarms.utils.plotters import plot_cost_history
-from pyswarms.utils.search.grid_search import GridSearch
-from pyswarms.utils.search.random_search import RandomSearch
+from pyswarms_monkey_patch.pso_parameter_tuning import RandomSearchUpdate, GridSearchUpdate
 # sklearn imports
 # learning algos
 from sklearn import linear_model
@@ -24,92 +23,6 @@ from abc import ABC, abstractmethod
 from codetiming import Timer
 
 #Monkey Patch
-class GridSearchUpdate(RandomSearch):
-    
-    def __init__(        
-        self,
-        optimizer,
-        n_particles,
-        dimensions,
-        options,
-        objective_func,
-        iters,
-        n_selection_iters,
-        bounds=None,
-        velocity_clamp=(0, 1),
-        **kwargs
-    ):
-        
-        super(GridSearchUpdate,self).__init__(
-            optimizer,
-            n_particles,
-            dimensions,
-            options,
-            objective_func,
-            iters,
-            n_selection_iters,
-            bounds=bounds,
-            velocity_clamp=velocity_clamp,
-        )
-        self.kwargs = kwargs
-        # invoke assertions
-        self.assertions()
-    
-    def generate_score(self, options):
-        """Generate score for optimizer's performance on objective function
-
-        Parameters
-        ----------
-
-        options: dict
-            a dict with the following keys: {'c1', 'c2', 'w', 'k', 'p'}
-        """
-
-        # Intialize optimizer
-        f = self.optimizer(
-            self.n_particles, self.dims, options, self.bounds, velocity_clamp=self.vclamp
-        )
-        
-        #print(self.kwargs)
-        #breakpoint()
-
-        # Return score
-        return f.optimize(self.objective_func, iters = self.iters,**self.kwargs)
-    
-    def search(self, maximum=False):
-        import operator as op
-        """Compare optimizer's objective function performance scores
-        for all combinations of provided parameters
-
-        Parameters
-        ----------
-
-        maximum: bool
-            a bool defaulting to False, returning the minimum value for the
-            objective function. If set to True, will return the maximum value
-            for the objective function.
-        """
-
-        # Generate the grid of all hyperparameter value combinations
-        grid = self.generate_grid()
-
-        # Calculate scores for all hyperparameter combinations
-        scores = [self.generate_score(i)[0] for i in grid]
-        
-        print(min(scores))
-        print(len(scores))
-
-        # Default behavior
-        idx, self.best_score = min(enumerate(scores), key=op.itemgetter(1))
-
-        # Catches the maximum bool flag
-        if maximum:
-            idx, self.best_score = max(enumerate(scores), key=op.itemgetter(1))
-
-        # Return optimum hyperparameter value property from grid using index
-        self.best_options = op.itemgetter(idx)(grid)
-        return self.best_score, self.best_options
-
 
 class FSS_PSO_Builder:
     #results data aggregated over multiple runs
@@ -117,63 +30,87 @@ class FSS_PSO_Builder:
     d = {'best fitness error': [], 'best fitness stdv':[],'msle (subset)': [],'msle (all)':[], 'r2 (subset)':[], 'r2 (all)':[], 'mae (subset)':[], 'mae (all)':[],'ratio selected':[],'selected features': [], 'time':[]}
     #data = pd.read_excel(file_name)
     # performance_metric -> pass in list of sklearn metrics later
-    def __init__(self, data, options, n_particles,it, regressor ,performance_metric,alpha, obj_function_equation, final_eval_ML_model_1, final_eval_ML_model_2, gridSearch):
+    def __init__(self, 
+    data, 
+    options, 
+    n_particles,
+    it, 
+    regressor ,
+    performance_metric,alpha, 
+    obj_function_equation, 
+    final_eval_ML_model_1, 
+    final_eval_ML_model_2, 
+    pso_parameter_optimiser
+    ):
         self.temp_best_cost = None
         self.cost_stdv = None
         
         self.columns = list(data.columns)
         self.X, self.y = self.__import_data(data)
         
-        self.dimensions = self.X.shape[1]# dimensions should be the number of features
+        self.dimensions = self.X.shape[1]# dimensions = number of features
 
         self.regressor = regressor #drives fitness function
-
         #Post optimsiation evaluation metrics
         self.m1 = final_eval_ML_model_1
         self.m2 = final_eval_ML_model_2
 
-
         self.obj_function_equation = obj_function_equation
-        if gridSearch:
+        
+        if pso_parameter_optimiser == 'random_search':
+            bounds = self.__get_random_search_bounds()
+            options = self.__random_search_parameter_optimiser(bounds, n_particles, self.dimensions,self.f, it, 3, self.X, self.y, performance_metric, alpha )
 
-            # options = {'c1': [1, 2, 3],
-            #             'c2': [1, 2, 3],
-            #             'w' : [2, 3, 5],
-            #             'k' : [5, 10, 15],
-            #             'p' : 1}
+        if pso_parameter_optimiser == 'grid_search':
+            parameter_grid_seed = self.__get_grid_search_grid_seed()
+            options = self.__grid_search_parameter_optimiser(parameter_grid_seed, n_particles, self.dimensions,self.f, it, self.X, self.y, performance_metric, alpha )
 
-            options = {'c1': [1, 5],
+        #IDEA: maybe embedd timer into CV fitness code to obtain and be able to report avg train and test times
+        t = Timer(name="class")
+        t.start()
+        self.optimizer = ps.discrete.BinaryPSO(n_particles=n_particles, dimensions=self.dimensions, options=options)# Call instance of PSO
+        self.cost, self.pos = self.optimizer.optimize(self.f,  iters=it, verbose=True, X=self.X, y=self.y, performance_metric = performance_metric, alpha=alpha)# Perform optimization
+        self.optimisation_time = t.stop()
+
+    def __random_search_parameter_optimiser(self, opts, n_particles, dimensions, OF, it, n_selection_iters, X, y,  performance_metric, alpha):
+
+        r = RandomSearchUpdate(ps.discrete.BinaryPSO, n_particles=n_particles, dimensions=dimensions,
+                options=opts, objective_func=OF, iters=it, n_selection_iters = n_selection_iters,X=X, y=y, performance_metric = performance_metric, alpha=alpha)
+
+        _ , best_options= r.search()
+
+        return best_options
+    
+    def __grid_search_parameter_optimiser(self, opts, n_particles, dimensions, OF, it,  X, y,  performance_metric, alpha):
+
+        g = GridSearchUpdate(ps.discrete.BinaryPSO, n_particles=n_particles, dimensions=dimensions,
+                options=opts, objective_func=OF, iters=it, X=X, y=y, performance_metric = performance_metric, alpha=alpha)
+
+        _ , best_options= g.search()
+
+        return best_options
+
+    #Todo: update this function to include 1)the ability to accept manual input from user 2) choose from educated values according to literature
+    def __get_random_search_bounds(self):
+        return {'c1': [1, 5],
                'c2': [6, 10],
                'w' : [2, 5],
                'k' : [11, 15],
                'p' : 1}
-
-            g = GridSearchUpdate(ps.discrete.BinaryPSO, n_particles=n_particles, dimensions=self.dimensions,
-                    options=options, objective_func=self.f, iters=it, n_selection_iters = 2,X=self.X, y=self.y, performance_metric = performance_metric, alpha=alpha)
-
-            _ , best_options= g.search()
-
-            options = best_options
-
-
-
-        t = Timer(name="class")
-        t.start()
-        
-        self.optimizer = ps.discrete.BinaryPSO(n_particles=n_particles, dimensions=self.dimensions, options=options)# Call instance of PSO
-        self.cost, self.pos = self.optimizer.optimize(self.f,  iters=it, verbose=True, X=self.X, y=self.y, performance_metric = performance_metric, alpha=alpha)# Perform optimization
-        
-        self.optimisation_time = t.stop()
+    #Todo: update this function to include 1)the ability to accept manual input from user 2) choose from educated values according to literature
+    def __get_grid_search_grid_seed(self):
+        return {'c1': [1, 2, 3],
+                        'c2': [1, 2, 3],
+                        'w' : [2, 3, 5],
+                        'k' : [5, 10, 15],
+                        'p' : 1}        
 
     def __import_data(self, data):
         index = len(self.columns)
         X = (data.iloc[:, 0:index-1]).to_numpy()
         y = (data.iloc[:, -1]).to_numpy()
         return X, y
-    # def __set_best_fitness_err_stdv(self, min_fit_error, associated_stdv):
-    #     if ((self.temp_best_cost is None) or (min_fit_error < self.temp_best_cost)):
-    #         self.temp_best_cost = min_fit_error
-    #         self.cost_stdv = associated_stdv
+
     def __set_best_fitness_err_stdv(self, fitness_err_mean, fitness_err_stdv):
 
         #find minimum fitness error and it's associated stdev
@@ -287,7 +224,6 @@ class FSS_PSO_Builder:
         
         return j
 
-
     def do_cross_val(self):
         # Get the selected features from the final positions
         X_selected_features = self.X[:,self.pos==1]# subset
@@ -334,11 +270,7 @@ class FSS_PSO_Builder:
     def save_cost_history(self):
         #eveytime class is initialised and thus optimiser is run, store the cost history for that iteration in the class variable 'cost_histories'
         FSS_PSO_Builder.cost_histories.append(self.optimizer.cost_history)
-
-        
-         
-
-        
+     
     def count_selected_features(self):
         self.num_selected = np.count_nonzero(self.pos)
         self.total_feats = len(self.pos)
@@ -377,13 +309,21 @@ class FSS_PSO_Builder:
         sns.pairplot(df1,height=5, aspect=.8, kind="reg")
         plt.show()            
     
+    #initialises FSS_PSO
     def build(self):
         return FSS_PSO(self.columns, self.optimizer, self.cost,  self.pos, self.selected_features_ratio, FSS_PSO_Builder.d, FSS_PSO_Builder.cost_histories)
         
 
 class FSS_PSO:
     
-    def __init__(self, columns, optimizer, cost, pos,  selected_features_ratio, results, cost_histories):
+    def __init__(self, 
+    columns, 
+    optimizer, 
+    cost, 
+    pos,  
+    selected_features_ratio, 
+    results, 
+    cost_histories):
         #all initialisations from builder
         self.columns = columns
         self.optimizer = optimizer
@@ -407,14 +347,14 @@ class FSS_PSO:
 
         return results
 
-    def get_selected_feature_history(self):
+    def __get_selected_feature_history(self):
         flat_feat_freq_list = self.__flatten(self.results['selected features'])
         return flat_feat_freq_list
 
     def __flatten(self,t):
         return [item for sublist in t for item in sublist]
 
-    def cost_histories_box_plots(self):
+    def __cost_histories_box_plots(self):
 
         df = pd.DataFrame(self.cost_histories)
         
@@ -427,17 +367,15 @@ class FSS_PSO:
         sns.lineplot(data=avg_line)
         plt.show()
 
+    def __plot_feat_frequency(self):
 
-        
-    def plot_feat_frequency(self):
-
-        flat_list = self.get_selected_feature_history()
+        flat_list = self.__get_selected_feature_history()
 
         feat_freq_dict = dict((x,flat_list.count(x)) for x in set(flat_list))
         plt.bar(feat_freq_dict.keys(), feat_freq_dict.values())
         plt.show()
     
-    def plot_subset_size_hist(self):
+    def __plot_subset_size_hist(self):
         results = pd.DataFrame(data=self.results)
         print(results["ratio selected"])
 
@@ -445,6 +383,16 @@ class FSS_PSO:
         #sns.distplot(results["ratio selected"])
         plt.show()
 
+    def aggregate_optional_functions(self, config):
+        #aggregate_of_runs = post_runs.build()
+
+        #aggregate_of_runs.save_results_csv()
+
+        if config['plot_subset_size_histo']:
+            self.__plot_subset_size_hist()
+        if config['plot_feature_frequency']:
+            self.__plot_feat_frequency()
+        self.__cost_histories_box_plots()
 
 #OF Expressions
 
@@ -466,7 +414,7 @@ data = pd.read_excel('drivPoints.xlsx')
 
 def setup_pso_builder(config, data, builder):
 
-    regressor = None
+    
 
     optimisation_models = {
         'LR': linear_model.LinearRegression(),
@@ -476,8 +424,7 @@ def setup_pso_builder(config, data, builder):
     if config['optimisation_model'] in optimisation_models:
         regressor = optimisation_models[config['optimisation_model']]
 
-    m1 = None
-    m2 = None
+
 
     evaluation_models = {
         'LR': linear_model.LinearRegression(),
@@ -504,7 +451,9 @@ def setup_pso_builder(config, data, builder):
         performance_metric = performance_metrics[config['performance_metric']]
         obj_fcn = objective_fcns[config['performance_metric']]
 
-    n_particles = config['n_particles']
+
+    #Todo: How to tune these parameters?
+    n_particles = config['n_particles'] 
     iterations = config['iterations']
 
 
@@ -512,7 +461,7 @@ def setup_pso_builder(config, data, builder):
     
     options = {key: config[key] for key in keys_to_extract}
 
-    a = builder(data, options, n_particles, iterations, regressor,performance_metric, config['alpha_balancing_coefficient'], obj_fcn, m1, m2, gridSearch=config['pso_parameter_gridSearch'] )
+    a = builder(data, options, n_particles, iterations, regressor,performance_metric, config['alpha_balancing_coefficient'], obj_fcn, m1, m2, config['pso_parameter_optimiser'] )
 
 
     return a   
@@ -546,16 +495,6 @@ def run(config):
     return a
 
 
-def aggregate_optional_functions(config, post_runs):
-    aggregate_of_runs = post_runs.build()
-
-    aggregate_of_runs.save_results_csv()
-
-    if config['plot_subset_size_histo']:
-        aggregate_of_runs.plot_subset_size_hist()
-    if config['plot_feature_frequency']:
-        aggregate_of_runs.plot_feat_frequency()
-    aggregate_of_runs.cost_histories_box_plots()
 
 parameter_config = {
     'runs': 10, #each run will produce a subset
@@ -568,7 +507,7 @@ parameter_config = {
     'n_particles':30,
     'iterations':10,
     #pso hyperparameters - find out how to tune these by emailing author
-    'pso_parameter_gridSearch':True,
+    'pso_parameter_optimiser':'random_search',
     'c1': 0.5, 'c2': 0.5, 'w':0.3, 'k': 30, 'p':2,
     #optional functionality parameters
     'save_performance_cost': False,
@@ -579,9 +518,12 @@ parameter_config = {
     
 }
 
-a = run(parameter_config)
+multiple_runs = run(parameter_config)
+aggregated_PSO_results = multiple_runs.build()
 
-aggregate_optional_functions(parameter_config, a)
+aggregated_PSO_results.save_results_csv()
+aggregated_PSO_results.aggregate_optional_functions(parameter_config)
+#aggregate_optional_functions(parameter_config, multiple_runs)
 
 
 #Todo
@@ -589,13 +531,15 @@ aggregate_optional_functions(parameter_config, a)
     #do logic
     #add excel sheet functionality
         #each row in excel sheet is a 'job'
-#Modularise code
-    #read up on python modules
 
-#Functionality: save into folders categorised by module
+
+#Functionality: save into folders categorised by model
 
 #Read
     #General articles: evaluation metrics, ensemble methods
     #Journals
 #Other
     #apply for extension
+
+
+#https://opensource.com/article/18/5/how-retrieve-source-code-python-functions
