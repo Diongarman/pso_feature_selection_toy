@@ -24,7 +24,7 @@ data = pd.read_excel('drivPoints.xlsx')
 
 
 class PSO_Builder_Config_Manager:
-    def __init__(self, data, config, builder: FSS_PSO_Builder):
+    def __init__(self, data, config, builder):
         self.data = data
         self.config = config
         self.builder = builder
@@ -120,7 +120,7 @@ class PSO_Builder_Config_Manager:
         return a
 
 parameter_config = {
-    'runs': 2, #each run will produce a subset
+    'runs': 1, #each run will produce a subset
     #OF Parameters
     'wrapper_model': 'RFR',
     'performance_metric': 'R2',
@@ -141,7 +141,7 @@ parameter_config = {
     
 }
 
-print('WHAT THE HELL')
+
 pso_ui = PSO_Builder_Config_Manager(data, parameter_config,FSS_PSO_Builder)
 multiple_runs = pso_ui.run()# Aggregate data
 aggregated_PSO_results = multiple_runs.build(FSS_PSO_Aggregate_Results)
