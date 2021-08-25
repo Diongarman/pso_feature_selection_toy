@@ -20,11 +20,11 @@ from sklearn.model_selection import cross_val_score, cross_validate
 
 from codetiming import Timer
 
-class FSS_PSO_Aggregate_Results:
+class Repeated_Experiment_Results:
     
     def __init__(self, 
     columns, 
-    optimizer: ps.discrete.BinaryPSO, 
+    optimizer, 
     cost, 
     pos,  
     selected_features_ratio, 
@@ -60,17 +60,22 @@ class FSS_PSO_Aggregate_Results:
     def __flatten(self,t):
         return [item for sublist in t for item in sublist]
 
+
+    #Todo: if too many iterations then plot IQR error band like plot: https://stackoverflow.com/questions/61888674/can-you-plot-interquartile-range-as-the-error-band-on-a-seaborn-lineplot
     def __cost_histories_box_plots(self):
 
         df = pd.DataFrame(self.cost_histories)
         
         avg_line = df.mean().to_frame()
-        print(df)
-        print(avg_line)
-        sns.boxplot(data=df)
-        sns.swarmplot(data=df)
+        avg_line.columns = ['Avg']
+        #print(df)
+        #print(avg_line)
+        ax = sns.boxplot(data=df)
+        sns.swarmplot(data=df)#Todo: color by run i.e. rowise
 
         sns.lineplot(data=avg_line)
+
+        ax.set(xlabel="Swarm Iteration", ylabel="Fitness Cost/Error")
         plt.show()
 
     def __plot_feat_frequency(self):
@@ -101,7 +106,7 @@ class FSS_PSO_Aggregate_Results:
         self.__cost_histories_box_plots()
 
 
-class FSS_PSO_Builder:
+class FSS_PSO_Experimental_Data_Collector:
     #results data aggregated over multiple runs
     cost_histories = []
     d = {'best fitness error': [], 'best fitness stdv':[],'msle (subset)': [],'msle (all)':[], 'r2 (subset)':[], 'r2 (all)':[], 'mae (subset)':[], 'mae (all)':[],'ratio selected':[],'selected features': [], 'time':[]}
@@ -113,7 +118,8 @@ class FSS_PSO_Builder:
     n_particles,
     it, 
     regressor ,
-    performance_metric,alpha, 
+    performance_metric,
+    alpha, 
     obj_function_equation, 
     final_eval_ML_model_1, 
     final_eval_ML_model_2, 
@@ -124,7 +130,7 @@ class FSS_PSO_Builder:
         
         self.columns = list(data.columns)
         self.X, self.y = self.__import_data(data)
-        
+
         self.dimensions = self.X.shape[1]# dimensions = number of features
 
         self.regressor = regressor #drives fitness function
@@ -189,17 +195,17 @@ class FSS_PSO_Builder:
 
     #Todo: update this function to include 1)the ability to accept manual input from user 2) choose from educated values according to literature
     def __get_random_search_bounds(self):
-        return {'c1': [1, 5],
-               'c2': [6, 10],
-               'w' : [2, 5],
-               'k' : [11, 15],
+        return {'c1': [.25, .75],
+               'c2': [.25, .75],
+               'w' : [.1, 1],
+               'k' : [5, 15],#Todo: COmpute dynamically as a function of n_particle
                'p' : 1}
     #Todo: update this function to include 1)the ability to accept manual input from user 2) choose from educated values according to literature
     def __get_grid_search_grid_seed(self):
-        return {'c1': [1, 2, 3],
-                        'c2': [1, 2, 3],
-                        'w' : [2, 3, 5],
-                        'k' : [5, 10, 15],
+        return {'c1': [.25, .5, .75],
+                        'c2': [.25, .5, .75],
+                        'w' : [.25, .5, .75],
+                        'k' : [5, 10, 15], #Todo: COmpute dynamically as a function of n_particles
                         'p' : 1}        
 
     def __import_data(self, data):
@@ -290,7 +296,6 @@ class FSS_PSO_Builder:
         #Stdev 
         particle_fitness_err_stdev = np.std(scores)
 
-        print('stdev',particle_fitness_err_stdev)
 
         return (particle_fitness_err_mean, particle_fitness_err_stdev)
 
@@ -314,16 +319,15 @@ class FSS_PSO_Builder:
             alpha: The balancing value
         
         """
-        p = kwargs['P'](y_true,y_pred) #objective 1
-        #print('P',p)
-        #print('Ratio',kwargs['ratio_selected_features'])
-        #kwargs['ratio_selected_features'] is objective 2
+        obj1 = kwargs['P'](y_true,y_pred) #objective 1
+        obj2 = kwargs['ratio_selected_features'] #is objective 2
         
-        j = self.obj_function_equation(p, kwargs['ratio_selected_features'], kwargs['alpha'])
+        particle_value = self.obj_function_equation(obj1,obj2, kwargs['alpha'])
         
-        return j
+        return particle_value
 
-    def do_cross_val(self):
+    #Step 4 in generic wrapper framework - could be abstract method at some point that switches for validation in fuzzy framework, or could have two validation procedure. This one validates models accuracy and fuzzy does interpretability
+    def wrapper_validation_cross_val(self):
         # Get the selected features from the final positions
         X_selected_features = self.X[:,self.pos==1]# subset
 
@@ -353,22 +357,22 @@ class FSS_PSO_Builder:
         self.mae_all = mae_all['test_score'].mean()
 
     def create_results(self):
-        FSS_PSO_Builder.d['best fitness error'].append(self.cost)
-        FSS_PSO_Builder.d['best fitness stdv'].append(self.cost_stdv)
-        FSS_PSO_Builder.d['r2 (subset)'].append(self.r2_subset)
-        FSS_PSO_Builder.d['r2 (all)'].append(self.r2_all)        
-        FSS_PSO_Builder.d['msle (subset)'].append(self.msle_subset)
-        FSS_PSO_Builder.d['msle (all)'].append(self.msle_all)
-        FSS_PSO_Builder.d['mae (subset)'].append(self.mae_subset)
-        FSS_PSO_Builder.d['mae (all)'].append(self.mae_all)       
-        #FSS_PSO_Builder.d['ratio selected'].append(self.selected_features_ratio)
-        FSS_PSO_Builder.d['ratio selected'].append(self.num_selected)
-        FSS_PSO_Builder.d['selected features'].append(self.__get_feature_col_names())#data is global - consider changing this
-        FSS_PSO_Builder.d['time'].append(self.optimisation_time)
+        FSS_PSO_Experimental_Data_Collector.d['best fitness error'].append(self.cost)
+        FSS_PSO_Experimental_Data_Collector.d['best fitness stdv'].append(self.cost_stdv)
+        FSS_PSO_Experimental_Data_Collector.d['r2 (subset)'].append(self.r2_subset)
+        FSS_PSO_Experimental_Data_Collector.d['r2 (all)'].append(self.r2_all)        
+        FSS_PSO_Experimental_Data_Collector.d['msle (subset)'].append(self.msle_subset)
+        FSS_PSO_Experimental_Data_Collector.d['msle (all)'].append(self.msle_all)
+        FSS_PSO_Experimental_Data_Collector.d['mae (subset)'].append(self.mae_subset)
+        FSS_PSO_Experimental_Data_Collector.d['mae (all)'].append(self.mae_all)       
+        #FSS_PSO_Experimental_Data_Collector.d['ratio selected'].append(self.selected_features_ratio)
+        FSS_PSO_Experimental_Data_Collector.d['ratio selected'].append(self.num_selected)
+        FSS_PSO_Experimental_Data_Collector.d['selected features'].append(self.__get_feature_col_names())#data is global - consider changing this
+        FSS_PSO_Experimental_Data_Collector.d['time'].append(self.optimisation_time)
 
     def save_cost_history(self):
         #eveytime class is initialised and thus optimiser is run, store the cost history for that iteration in the class variable 'cost_histories'
-        FSS_PSO_Builder.cost_histories.append(self.optimizer.cost_history)
+        FSS_PSO_Experimental_Data_Collector.cost_histories.append(self.optimizer.cost_history)
      
     def count_selected_features(self):
         self.num_selected = np.count_nonzero(self.pos)
@@ -399,16 +403,46 @@ class FSS_PSO_Builder:
         #print(self.optimizer.cost_history)
         plt.show()
 
+    #Todo: Research stats videos and include interpretation of this viz in dissertation
     def viz_scatter_plot_matrix(self):
         X_selected_features = self.X[:,self.pos==1]
         df1 = pd.DataFrame(X_selected_features)
 
+        df1.columns = self.__get_feature_col_names()
+
         #df1['labels'] = pd.Series(y)
 
         sns.pairplot(df1,height=5, aspect=.8, kind="reg")
-        plt.show()            
+        plt.show()
+
+    def viz_correlation_heat_map(self):
+        X_selected_features = self.X[:,self.pos==1]
+        df = pd.DataFrame(X_selected_features)
+
+        df.columns = self.__get_feature_col_names()
+
+        sns.set_theme(style="white")
+
+
+        # Compute the correlation matrix
+        corr = df.corr()
+
+        # Generate a mask for the upper triangle
+        mask = np.triu(np.ones_like(corr, dtype=bool))
+
+        # Set up the matplotlib figure
+        f, ax = plt.subplots(figsize=(11, 9))
+
+        # Generate a custom diverging colormap
+        cmap = sns.diverging_palette(230, 20, as_cmap=True)
+
+        # Draw the heatmap with the mask and correct aspect ratio
+        sns.heatmap(corr, mask=mask, cmap=cmap, vmax=.3, center=0,
+                    square=True, linewidths=.5, cbar_kws={"shrink": .5})
+        plt.show()
+
     
-    #initialises FSS_PSO_Aggregate_Results
-    def build(self, aggregate_results: FSS_PSO_Aggregate_Results):
-        return aggregate_results(self.columns, self.optimizer, self.cost,  self.pos, self.selected_features_ratio, FSS_PSO_Builder.d, FSS_PSO_Builder.cost_histories)
+    #initialises Repeated_Experiment_Results
+    def build(self, aggregate_results: Repeated_Experiment_Results):
+        return aggregate_results(self.columns, self.optimizer, self.cost,  self.pos, self.selected_features_ratio, FSS_PSO_Experimental_Data_Collector.d, FSS_PSO_Experimental_Data_Collector.cost_histories)
         

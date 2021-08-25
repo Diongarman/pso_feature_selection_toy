@@ -10,7 +10,7 @@ from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
 from sklearn.metrics import mean_squared_error as mse
 from sklearn.metrics import r2_score as r2
 #internal imports
-from feature_selection.feature_selection_regression import FSS_PSO_Aggregate_Results, FSS_PSO_Builder #Is interaction/dependency between these classes
+from feat_select.feature_selection_regression import Repeated_Experiment_Results, FSS_PSO_Experimental_Data_Collector #Is interaction/dependency between these classes
 
 
 
@@ -23,7 +23,7 @@ data = pd.read_excel('drivPoints.xlsx')
 
 
 
-class PSO_Builder_Config_Manager:
+class Experiment_Config_Manager:
     def __init__(self, data, config, builder):
         self.data = data
         self.config = config
@@ -93,7 +93,7 @@ class PSO_Builder_Config_Manager:
         j = (alpha * (obj_1) + (1.0 - alpha) * (obj_2))
         return j
 
-    def run(self):
+    def run_experiment_n_times(self):
         for x in range(self.config['runs']):
 
             #Mandatory function calls
@@ -102,7 +102,7 @@ class PSO_Builder_Config_Manager:
             a = self.__setup_pso_builder() #Todo: add decoupling later
             #initialise other fields
             a.count_selected_features()
-            a.do_cross_val()
+            a.wrapper_validation_cross_val() #Todo: Does this need to be conditional
             #add results
             a.create_results()
             #save cost_history
@@ -114,15 +114,17 @@ class PSO_Builder_Config_Manager:
 
             if self.config['save_scatter_plot_matrix']:
                 a.viz_scatter_plot_matrix()
+            if self.config['save_correlation_matrix']:
+                a.viz_correlation_heat_map()
 
             #reset optimiser for next run of PSO
             a.optimizer.reset()
         return a
 
-parameter_config = {
-    'runs': 1, #each run will produce a subset
+experiment_parameter_config = {
+    'runs': 10, #each run will produce a subset
     #OF Parameters
-    'wrapper_model': 'RFR',
+    'wrapper_model': 'LR',
     'performance_metric': 'R2',
     'eval_model_post_optimisation':'LR',
     'alpha_balancing_coefficient': 0.5,
@@ -135,6 +137,7 @@ parameter_config = {
     #optional functionality parameters
     'save_performance_cost': False,
     'save_scatter_plot_matrix': False,
+    'save_correlation_matrix': False,
     'save_evaluation_results': True,
     'plot_subset_size_histo': True,
     'plot_feature_frequency': True,
@@ -142,28 +145,28 @@ parameter_config = {
 }
 
 
-pso_ui = PSO_Builder_Config_Manager(data, parameter_config,FSS_PSO_Builder)
-multiple_runs = pso_ui.run()# Aggregate data
-aggregated_PSO_results = multiple_runs.build(FSS_PSO_Aggregate_Results)
+pso_ui = Experiment_Config_Manager(data, experiment_parameter_config, FSS_PSO_Experimental_Data_Collector)
+multiple_runs = pso_ui.run_experiment_n_times()# Aggregate data
+aggregated_PSO_results = multiple_runs.build(Repeated_Experiment_Results)
 aggregated_PSO_results.save_results_csv()
-aggregated_PSO_results.aggregate_optional_functions(parameter_config)
+aggregated_PSO_results.aggregate_optional_functions(experiment_parameter_config)
 
 
 
-#Todo
-#read config file that runs PSO algorithm
-    #do logic
-    #add excel sheet functionality
-        #each row in excel sheet is a 'job'
+# #Todo
+# #read config file that runs PSO algorithm
+#     #do logic
+#     #add excel sheet functionality
+#         #each row in excel sheet is a 'job'
 
 
-#Functionality: save into folders categorised by model
+# #Functionality: save into folders categorised by model
 
-#Read
-    #General articles: evaluation metrics, ensemble methods
-    #Journals
-#Other
-    #apply for extension
+# #Read
+#     #General articles: evaluation metrics, ensemble methods
+#     #Journals
+# #Other
+#     #apply for extension
 
 
-#https://opensource.com/article/18/5/how-retrieve-source-code-python-functions
+# #https://opensource.com/article/18/5/how-retrieve-source-code-python-functions
