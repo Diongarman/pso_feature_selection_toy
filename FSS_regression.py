@@ -17,9 +17,22 @@ from feat_select.feature_selection_regression import Repeated_Experiment_Results
 
 #GLOBALS
 candidate_solutions = {}
-data = pd.read_excel('drivPoints.xlsx')
+# data = pd.read_excel('drivPoints.xlsx')
 #def excel_config_parser: pass #should return a pandas dataframe, which gets passed to 'setup_pso_builder' to be used in 'builder'
 #data = excel_config_parser()
+from sklearn.datasets import make_regression,make_sparse_uncorrelated
+X, y = make_regression(n_samples=2000, n_features=25, bias=0,
+                           n_informative=9,
+                           effective_rank=3,
+                           random_state=1)
+
+#X, y = make_sparse_uncorrelated(n_samples=1000, n_features=50)
+# Plot toy dataset per feature
+#
+data = pd.DataFrame(X)
+data['labels'] = y
+
+print(data)
 
 
 
@@ -28,6 +41,8 @@ class Experiment_Config_Manager:
         self.data = data
         self.config = config
         self.builder = builder
+        import uuid
+        self.config_uid = uuid.uuid1() #denotes and instance of a particular experiment configuration
 
     def __setup_pso_builder(self):
 
@@ -78,7 +93,7 @@ class Experiment_Config_Manager:
         
         options = {key: self.config[key] for key in keys_to_extract}
 
-        a = self.builder(self.data, options, n_particles, iterations, regressor, performance_metric, self.config['alpha_balancing_coefficient'], obj_fcn, m1, m2, self.config['pso_parameter_optimiser'] )
+        a = self.builder(self.data, options, n_particles, iterations, regressor, performance_metric, self.config['alpha_balancing_coefficient'], obj_fcn, m1, m2, self.config['pso_parameter_optimiser'],self.config_uid )
 
         return a
 
@@ -94,7 +109,9 @@ class Experiment_Config_Manager:
         return j
 
     def run_experiment_n_times(self):
-        for x in range(self.config['runs']):
+
+
+        for n in range(self.config['runs']):
 
             #Mandatory function calls
 
@@ -110,34 +127,36 @@ class Experiment_Config_Manager:
             #optional function calls
 
             if self.config['save_performance_cost']:
-                a.viz_cost_history()
+                a.viz_cost_history(n)
 
             if self.config['save_scatter_plot_matrix']:
-                a.viz_scatter_plot_matrix()
+                a.viz_scatter_plot_matrix(n)
             if self.config['save_correlation_matrix']:
-                a.viz_correlation_heat_map()
+                a.viz_correlation_heat_map(n)
+            
 
             #reset optimiser for next run of PSO
             a.optimizer.reset()
         return a
 
 experiment_parameter_config = {
-    'runs': 10, #each run will produce a subset
+    'runs': 1, #each run will produce a subset
     #OF Parameters
     'wrapper_model': 'LR',
     'performance_metric': 'R2',
     'eval_model_post_optimisation':'LR',
     'alpha_balancing_coefficient': 0.5,
     #pso optimiser swarm parameters
-    'n_particles':30,
-    'iterations':10,
-    #pso hyperparameters - find out how to tune these by emailing author
+    'n_particles':50,
+    'iterations':100,
+    #pso hyperparameters
     'pso_parameter_optimiser':'random_search',
+    #Todo: Make sure to signify meaning behind coefficients e.g. exploitation vs exploration
     'c1': 0.5, 'c2': 0.5, 'w':0.3, 'k': 30, 'p':2,
     #optional functionality parameters
-    'save_performance_cost': False,
-    'save_scatter_plot_matrix': False,
-    'save_correlation_matrix': False,
+    'save_performance_cost': True,
+    'save_scatter_plot_matrix': True,
+    'save_correlation_matrix': True,
     'save_evaluation_results': True,
     'plot_subset_size_histo': True,
     'plot_feature_frequency': True,
@@ -147,7 +166,7 @@ experiment_parameter_config = {
 
 pso_ui = Experiment_Config_Manager(data, experiment_parameter_config, FSS_PSO_Experimental_Data_Collector)
 multiple_runs = pso_ui.run_experiment_n_times()# Aggregate data
-aggregated_PSO_results = multiple_runs.build(Repeated_Experiment_Results)
+aggregated_PSO_results = multiple_runs.collect_results(Repeated_Experiment_Results)
 aggregated_PSO_results.save_results_csv()
 aggregated_PSO_results.aggregate_optional_functions(experiment_parameter_config)
 

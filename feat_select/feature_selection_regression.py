@@ -2,6 +2,7 @@
 import numpy as np
 import seaborn as sns
 import pandas as pd
+import matplotlib
 import matplotlib.pyplot as plt
 # Import PySwarms
 import pyswarms as ps
@@ -15,10 +16,18 @@ from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
 from sklearn.metrics import roc_auc_score, make_scorer
 from sklearn.metrics import mean_squared_error as mse
 from sklearn.metrics import r2_score as r2
+#stats
+from scipy.stats import pearsonr
 # CV
 from sklearn.model_selection import cross_val_score, cross_validate
-
+#time related
 from codetiming import Timer
+import time
+#Native
+import os
+
+
+matplotlib.use('Agg') #stops plots being displayed
 
 class Repeated_Experiment_Results:
     
@@ -29,7 +38,7 @@ class Repeated_Experiment_Results:
     pos,  
     selected_features_ratio, 
     results, 
-    cost_histories):
+    cost_histories, config_id):
         #all initialisations from builder
         self.columns = columns
         self.optimizer = optimizer
@@ -40,6 +49,7 @@ class Repeated_Experiment_Results:
         self.results = results
         self.cost_histories = cost_histories
         #new shit
+        self.config_uid = config_id 
     
     def save_results_csv(self):
         results = pd.DataFrame(data=self.results)
@@ -49,7 +59,7 @@ class Repeated_Experiment_Results:
             print(results)
         
         #Save results
-        results.to_csv('results.csv')
+        results.to_csv('Results_CSV/results.csv')
 
         return results
 
@@ -83,22 +93,36 @@ class Repeated_Experiment_Results:
         flat_list = self.__get_selected_feature_history()
 
         feat_freq_dict = dict((x,flat_list.count(x)) for x in set(flat_list))
-        plt.bar(feat_freq_dict.keys(), feat_freq_dict.values())
-        plt.show()
+
+        fig = plt.figure()
+        bar = plt.bar(feat_freq_dict.keys(), feat_freq_dict.values())
+
+        
+
+        
+
+        file_name = "Experiment_Results/Viz/Aggregated/feature__frequency_{}".format(str(self.config_uid))
+
+        fig.savefig(file_name, dpi=fig.dpi)
+        plt.clf()
+
+        #hist.savefig(file_name, dpi=400)
+
     
     def __plot_subset_size_hist(self):
         results = pd.DataFrame(data=self.results)
         print(results["ratio selected"])
 
-        sns.histplot(data=results, x="ratio selected", stat="count", discrete=True)
-        #sns.distplot(results["ratio selected"])
-        plt.show()
+        histo = sns.histplot(data=results, x="ratio selected", stat="count", discrete=True)
+        
+        file_name = "Experiment_Results/Viz/Aggregated/subset_size_{}".format(str(self.config_uid))
+
+        hist_fig = histo.figure
+
+        hist_fig.savefig(file_name)
+        plt.clf()
 
     def aggregate_optional_functions(self, config):
-        #aggregate_of_runs = post_runs.build()
-
-        #aggregate_of_runs.save_results_csv()
-
         if config['plot_subset_size_histo']:
             self.__plot_subset_size_hist()
         if config['plot_feature_frequency']:
@@ -109,7 +133,7 @@ class Repeated_Experiment_Results:
 class FSS_PSO_Experimental_Data_Collector:
     #results data aggregated over multiple runs
     cost_histories = []
-    d = {'best fitness error': [], 'best fitness stdv':[],'msle (subset)': [],'msle (all)':[], 'r2 (subset)':[], 'r2 (all)':[], 'mae (subset)':[], 'mae (all)':[],'ratio selected':[],'selected features': [], 'time':[]}
+    d = {'best fitness error': [], 'best fitness stdv':[], 'r2 (subset)':[], 'r2 (all)':[], 'mae (subset)':[], 'mae (all)':[],'ratio selected':[],'selected features': [], 'time':[]}
     #data = pd.read_excel(file_name)
     # performance_metric -> pass in list of sklearn metrics later
     def __init__(self, 
@@ -123,7 +147,8 @@ class FSS_PSO_Experimental_Data_Collector:
     obj_function_equation, 
     final_eval_ML_model_1, 
     final_eval_ML_model_2, 
-    pso_parameter_optimiser
+    pso_parameter_optimiser, 
+    config_id
     ):
         self.temp_best_cost = None
         self.cost_stdv = None
@@ -142,7 +167,7 @@ class FSS_PSO_Experimental_Data_Collector:
         #DEPENDENCY
         if pso_parameter_optimiser == 'random_search':
             bounds = self.__get_random_search_bounds()
-            options = self.__random_search_parameter_optimiser(bounds, n_particles, self.dimensions,self.f, it, 3, self.X, self.y, performance_metric, alpha )
+            options = self.__random_search_parameter_optimiser(bounds, n_particles, self.dimensions,self.f, it, 2, self.X, self.y, performance_metric, alpha )
         #DEPENDENCY
         if pso_parameter_optimiser == 'grid_search':
             parameter_grid_seed = self.__get_grid_search_grid_seed()
@@ -155,6 +180,9 @@ class FSS_PSO_Experimental_Data_Collector:
         self.optimizer = ps.discrete.BinaryPSO(n_particles=n_particles, dimensions=self.dimensions, options=options)# Call instance of PSO
         self.cost, self.pos = self.optimizer.optimize(self.f,  iters=it, verbose=True, X=self.X, y=self.y, performance_metric = performance_metric, alpha=alpha)# Perform optimization
         self.optimisation_time = t.stop()
+
+        self.config_id = config_id
+        
 
     def __random_search_parameter_optimiser(self, opts, n_particles, dimensions, OF, it, n_selection_iters, X, y,  performance_metric, alpha):
 
@@ -198,7 +226,7 @@ class FSS_PSO_Experimental_Data_Collector:
         return {'c1': [.25, .75],
                'c2': [.25, .75],
                'w' : [.1, 1],
-               'k' : [5, 15],#Todo: COmpute dynamically as a function of n_particle
+               'k' : [5, 50],#Todo: COmpute dynamically as a function of n_particle
                'p' : 1}
     #Todo: update this function to include 1)the ability to accept manual input from user 2) choose from educated values according to literature
     def __get_grid_search_grid_seed(self):
@@ -327,42 +355,86 @@ class FSS_PSO_Experimental_Data_Collector:
         return particle_value
 
     #Step 4 in generic wrapper framework - could be abstract method at some point that switches for validation in fuzzy framework, or could have two validation procedure. This one validates models accuracy and fuzzy does interpretability
+    #Repurpose this function so that 
     def wrapper_validation_cross_val(self):
         # Get the selected features from the final positions
         X_selected_features = self.X[:,self.pos==1]# subset
 
 
         # Compute R2 estimate using CV
-        r2_subset = cross_validate(self.m1, X_selected_features, self.y, cv=10, scoring='r2')
-        r2_all = cross_validate(self.m2, self.X, self.y, cv=10, scoring='r2')
+        r2_subset = cross_validate(self.m1, X_selected_features, self.y, cv=10, scoring='r2',return_train_score=True)
+        r2_all = cross_validate(self.m2, self.X, self.y, cv=10, scoring='r2',return_train_score=True)
 
         # Get mean R2 estimate obtained from CV
         self.r2_subset = r2_subset['test_score'].mean()
         self.r2_all = r2_all['test_score'].mean()
-        
-        # Compute msle estimate using CV
-        msle_subset = cross_validate(self.m1, X_selected_features, self.y, cv=10, scoring='neg_mean_squared_log_error')
-        msle_all = cross_validate(self.m2, self.X, self.y, cv=10, scoring='neg_mean_squared_log_error')
 
-        # Get mean msle estimate obtained from CV
-        self.msle_subset = msle_subset['test_score'].mean()
-        self.msle_all = msle_all['test_score'].mean()
+        print(r2_subset['test_score'])
+        print(r2_subset['train_score'])
+        print(r2_all['test_score'])
+        print(r2_all['train_score'])
+
+        print(r2_subset['fit_time'])
+        print(r2_subset['score_time'])
+        print(r2_all['fit_time'])
+        print(r2_all['score_time'])
+
+
+        self.__viz_overfitting_cross_val(r2_subset['test_score'], r2_subset['train_score'], r2_all['test_score'], r2_all['train_score'])
+
+        
 
         # Compute mae estimate using CV
-        mae_subset = cross_validate(self.m1, X_selected_features, self.y, cv=10, scoring='neg_mean_absolute_error')
-        mae_all = cross_validate(self.m2, self.X, self.y, cv=10, scoring='neg_mean_absolute_error')
+        mae_subset = cross_validate(self.m1, X_selected_features, self.y, cv=10, scoring='neg_mean_absolute_error',return_train_score=True)
+        mae_all = cross_validate(self.m2, self.X, self.y, cv=10, scoring='neg_mean_absolute_error',return_train_score=True)
 
         # Get mean mae estimate obtained from CV
         self.mae_subset = mae_subset['test_score'].mean()
         self.mae_all = mae_all['test_score'].mean()
+
+    def __viz_overfitting_cross_val(self,r2_test_fss, r2_train_fss, r2_test, r2_train):
+        folds = range(1, 10 + 1)
+        fig = plt.figure()
+        plt.plot(folds, r2_train_fss, 'o-', color='green', label='train subset')
+        plt.plot(folds, r2_test_fss, 'o-', color='red', label='test subset')
+        plt.plot(folds, r2_train, 'o-', color='blue', label='train')
+        plt.plot(folds, r2_test, 'o-', color='orange', label='test')
+        plt.legend()
+        plt.grid()
+        plt.xlabel('Number of fold')
+        plt.ylabel('R2')
+        #train_test.show()
+
+
+        file_name = "Experiment_Results/Viz/Overfitting/overfitting_{}".format(str(self.config_id ))
+        
+        #train_test_fig = plt.figure
+
+        
+        fig.savefig(file_name, dpi=fig.dpi)
+        plt.clf()
+    def wrapper_validation_cross_val_TEMP(self):
+        from sklearn.model_selection import KFold
+
+        kf = KFold(n_splits=10)
+        mae_train = []
+        mae_test = []
+        for train_index, test_index in kf.split(self.X):
+            
+            X_train, X_test = self.X.iloc[train_index], X.iloc[test_index]
+            y_train, y_test = self.y[train_index], y[test_index]
+           
+            self.m1.fit(X_train, y_train)
+            y_train_pred = self.m1.predict(X_train)
+            y_test_pred = self.m1.predict(X_test)
+            mae_train.append(mean_absolute_error(y_train, y_train_pred))
+            mae_test.append(mean_absolute_error(y_test, y_test_pred))
 
     def create_results(self):
         FSS_PSO_Experimental_Data_Collector.d['best fitness error'].append(self.cost)
         FSS_PSO_Experimental_Data_Collector.d['best fitness stdv'].append(self.cost_stdv)
         FSS_PSO_Experimental_Data_Collector.d['r2 (subset)'].append(self.r2_subset)
         FSS_PSO_Experimental_Data_Collector.d['r2 (all)'].append(self.r2_all)        
-        FSS_PSO_Experimental_Data_Collector.d['msle (subset)'].append(self.msle_subset)
-        FSS_PSO_Experimental_Data_Collector.d['msle (all)'].append(self.msle_all)
         FSS_PSO_Experimental_Data_Collector.d['mae (subset)'].append(self.mae_subset)
         FSS_PSO_Experimental_Data_Collector.d['mae (all)'].append(self.mae_all)       
         #FSS_PSO_Experimental_Data_Collector.d['ratio selected'].append(self.selected_features_ratio)
@@ -395,16 +467,30 @@ class FSS_PSO_Experimental_Data_Collector:
         cols = [self.columns[i] for i in indices]
 
         return cols
-    
-    def viz_cost_history(self):
 
-        plot_cost_history(cost_history=self.optimizer.cost_history)
+    def __create_empty_folder(self, partial_path):
+        curr_working_dir = os.path.abspath(__file__)
+        
+        curr_unix = int(time.time())
+        newpath = curr_working_dir + partial_path + str(curr_unix) 
+        if not os.path.exists(newpath):
+            os.makedirs(newpath)
+    
+    def viz_cost_history(self, experiment_n):
+
+        line_plot = plot_cost_history(cost_history=self.optimizer.cost_history)
         #print('mean neighbour history', self.optimizer.mean_neighbor_history)
         #print(self.optimizer.cost_history)
-        plt.show()
+        
+        file_name = "Experiment_Results/Viz/Cost_History/cost_history_experiment_{}_{}".format(experiment_n, str(self.config_id ))
+        
+        line_plot_fig = line_plot.figure
 
+        line_plot_fig.savefig(file_name)
+        plt.clf()
     #Todo: Research stats videos and include interpretation of this viz in dissertation
-    def viz_scatter_plot_matrix(self):
+    def viz_scatter_plot_matrix(self, experiment_n):
+        
         X_selected_features = self.X[:,self.pos==1]
         df1 = pd.DataFrame(X_selected_features)
 
@@ -412,10 +498,19 @@ class FSS_PSO_Experimental_Data_Collector:
 
         #df1['labels'] = pd.Series(y)
 
-        sns.pairplot(df1,height=5, aspect=.8, kind="reg")
-        plt.show()
+        pair_plot = sns.pairplot(df1,height=5, aspect=.8, kind="reg",corner=True)
 
-    def viz_correlation_heat_map(self):
+        pair_plot.map_lower(corrfunc)
+
+        file_name = "Experiment_Results/Viz/Scatter/scatter_matrix_experiment_{}_{}".format(experiment_n, str(self.config_id))
+        
+        pair_plot.savefig(file_name)
+        plt.clf()
+
+    #helper for scatterplot matrix. Source: https://stackoverflow.com/questions/50832204/show-correlation-values-in-pairplot-using-seaborn-in-python
+
+    def viz_correlation_heat_map(self, experiment_n):
+        
         X_selected_features = self.X[:,self.pos==1]
         df = pd.DataFrame(X_selected_features)
 
@@ -437,12 +532,30 @@ class FSS_PSO_Experimental_Data_Collector:
         cmap = sns.diverging_palette(230, 20, as_cmap=True)
 
         # Draw the heatmap with the mask and correct aspect ratio
-        sns.heatmap(corr, mask=mask, cmap=cmap, vmax=.3, center=0,
+        #Save heat map
+        heat_map = sns.heatmap(corr, mask=mask, cmap=cmap, vmax=.3, center=0,
                     square=True, linewidths=.5, cbar_kws={"shrink": .5})
-        plt.show()
+        heat_map_fig = heat_map.figure
+
+                   
+        
+        file_name = "Experiment_Results/Viz/Correlation/heatmap_experiment_{}_{}".format(experiment_n, str(self.config_id))
+
+        
+        heat_map_fig.savefig(file_name)
+        plt.clf()
+        #plt.show() #s_check
 
     
     #initialises Repeated_Experiment_Results
-    def build(self, aggregate_results: Repeated_Experiment_Results):
-        return aggregate_results(self.columns, self.optimizer, self.cost,  self.pos, self.selected_features_ratio, FSS_PSO_Experimental_Data_Collector.d, FSS_PSO_Experimental_Data_Collector.cost_histories)
-        
+    def collect_results(self, aggregate_results: Repeated_Experiment_Results):
+        return aggregate_results(self.columns, self.optimizer, self.cost,  self.pos, self.selected_features_ratio, FSS_PSO_Experimental_Data_Collector.d, FSS_PSO_Experimental_Data_Collector.cost_histories, self.config_id)
+
+
+#put back into class, breaks for some reaosn, rename x and y as class gets passed in to x paqrameter for some reason?
+def corrfunc(x, y, ax=None, **kws):
+    """Plot the correlation coefficient in the top left hand corner of a plot."""
+    r, _ = pearsonr(x, y)
+    ax = ax or plt.gca()
+    ax.annotate(f'ρ = {r:.2f}', xy=(.1, .9), xycoords=ax.transAxes)
+    #write-up: Can compare heat map and scatter plot

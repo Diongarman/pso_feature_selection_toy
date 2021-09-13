@@ -1,0 +1,2 @@
+,best fitness error,best fitness stdv,r2 (subset),r2 (all),mae (subset),mae (all),ratio selected,selected features,time
+0,0.20174555773960337,0.0033743362807955573,0.9565088845207933,1.0,-0.2906516154280801,-2.441924266960438e-15,9,"[0, 6, 9, 11, 12, 14, 17, 19, 23]",59.91611276699999
